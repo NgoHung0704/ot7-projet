@@ -66,6 +66,15 @@ def test_doc_meta_overrides_common_meta_without_mutating_input(store):
     assert doc == {"des": "a", "_meta": {"url": "u1", "sha256": "s1"}}
 
 
+def test_reused_doc_keeps_its_original_retrieval_time(store):
+    fetched_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC)
+    write(store, [{"des": "a", "_meta": {"retrieved_at": fetched_at}}, {"des": "b"}])
+
+    times = {doc["des"]: doc["_meta"]["retrieved_at"] for doc in store.read_latest("sentry_objects")}
+    assert times["a"].replace(tzinfo=UTC) == fetched_at
+    assert times["b"].replace(tzinfo=UTC) == NOW
+
+
 def test_crash_after_insert_keeps_previous_load_visible(store, monkeypatch):
     first = write(store, [{"des": "a"}])
     original = mongomock.collection.Collection.insert_many

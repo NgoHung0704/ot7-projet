@@ -31,17 +31,12 @@ class RawStore:
         """Write first, then switch the catalog, then delete the superseded writes of this batch.
 
         A reader that follows the catalog never sees a half-written batch. A doc's own `_meta`
-        (url, sha256) overrides the common `meta`.
+        (url, sha256, retrieved_at of a re-used document…) overrides the common `meta`.
         """
         load_id = new_load_id(collection, batch_id, now)
         defaults = {key: meta.get(key) for key in ("url", "dataset_version", "sha256")}
-        fixed = {
-            "source": collection,
-            "batch_id": batch_id,
-            "run_id": run_id,
-            "retrieved_at": now,
-            "load_id": load_id,
-        }
+        defaults["retrieved_at"] = now
+        fixed = {"source": collection, "batch_id": batch_id, "run_id": run_id, "load_id": load_id}
         stored = [{**doc, "_meta": {**defaults, **doc.get("_meta", {}), **fixed}} for doc in docs]
 
         target = self.db[collection]
