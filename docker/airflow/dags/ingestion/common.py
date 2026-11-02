@@ -32,10 +32,12 @@ def clean_record(record: dict) -> dict:
 def make_session() -> requests.Session:
     session = requests.Session()
     session.headers["User-Agent"] = USER_AGENT
+    # Server errors only: a rate-limit answer (403/429) needs minutes, not seconds, and is
+    # handled by the caller (see ingestion.sentry).
     retry = Retry(
         total=5,
         backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=("GET",),
     )
     session.mount("https://", HTTPAdapter(max_retries=retry))

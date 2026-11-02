@@ -7,6 +7,7 @@ import responses
 from responses import matchers
 from responses.registries import OrderedRegistry
 
+from ingestion.common import make_session
 from ingestion.sentry import SENTRY_URL, SentryFormatError, ingest_sentry
 from ingestion.store import CATALOG, RawStore
 
@@ -141,6 +142,19 @@ def test_blocked_call_waits_then_resumes(store, sleeps):
     assert counts["details_fetched"] == 2
 
 
+def test_sustained_429_through_the_real_session_waits_minutes(store, sleeps):
+    with responses.RequestsMock(registry=OrderedRegistry) as rsps:
+        mock_api(rsps, ["a"], {"a": (429, {})})
+        for _ in range(2):
+            rsps.add(responses.GET, SENTRY_URL, match=[matchers.query_param_matcher({"des": "a"})],
+                     status=429, json={})
+        rsps.add(responses.GET, SENTRY_URL, match=[matchers.query_param_matcher({"des": "a"})], json=detail("a"))
+        counts = ingest_sentry(store, make_session(), "2026-11", "manual__1", NOW, min_interval_s=0)
+
+    assert sleeps == [60, 120, 300]
+    assert counts["details_fetched"] == 1
+
+
 def test_still_blocked_after_every_wait_fails(store, sleeps):
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
         mock_api(rsps, ["a"], {"a": (403, {})})
@@ -164,12 +178,13 @@ def test_network_failure_keeps_previous_details(store):
     with responses.RequestsMock() as rsps:
         mock_api(rsps, ["2011 TO", "29075"], {"2011 TO": (200, detail("2011 TO")), "29075": (200, detail("29075"))})
         run(store)
-    first_load = store.latest_complete("sentry_details")["load_id"]
+    first_loads = {c: store.latest_complete(c)["load_id"] for c in ("sentry_objects", "sentry_removed", "sentry_details")}
 
     with responses.RequestsMock() as rsps:
         mock_api(rsps, ["2011 TO", "29075"], {"29075": (503, {})}, changed={"29075"})
         with pytest.raises(requests.HTTPError):
-            run(store)
+            run(store, now=NOW.replace(day=2))
 
-    assert store.latest_complete("sentry_details")["load_id"] == first_load
+    # The list and the details stay consistent: nothing of the failed run becomes visible
+    assert {c: store.latest_complete(c)["load_id"] for c in first_loads} == first_loads
     assert len(store.read_latest("sentry_details")) == 2

@@ -66,19 +66,10 @@ def ingest_sentry(
     now: datetime,
     min_interval_s: float = MIN_INTERVAL_S,
 ) -> dict[str, int]:
-    listing, url, digest = _get(session, {})
+    listing, listing_url, listing_digest = _get(session, {})
     version = check_version(listing)
-    store.write_batch(
-        "sentry_objects", batch_id, listing["data"],
-        {"url": url, "dataset_version": version, "sha256": digest}, run_id, now,
-    )
-
-    removed, url, digest = _get(session, {"removed": "1"})
+    removed, removed_url, removed_digest = _get(session, {"removed": "1"})
     check_version(removed)
-    store.write_batch(
-        "sentry_removed", batch_id, removed["data"],
-        {"url": url, "dataset_version": version, "sha256": digest}, run_id, now,
-    )
 
     # One call at a time (JPL asks clients not to send parallel requests), and only for the
     # asteroids whose list record changed: a few dozen a month instead of ~2,200.
@@ -103,6 +94,17 @@ def ingest_sentry(
             continue
         details.append({**payload, "_meta": {"url": url, "sha256": digest, "listing_sha256": fingerprint}})
         fetched += 1
+
+    # Written together once everything is fetched: staging never sees this month's list
+    # next to last month's details.
+    store.write_batch(
+        "sentry_objects", batch_id, listing["data"],
+        {"url": listing_url, "dataset_version": version, "sha256": listing_digest}, run_id, now,
+    )
+    store.write_batch(
+        "sentry_removed", batch_id, removed["data"],
+        {"url": removed_url, "dataset_version": version, "sha256": removed_digest}, run_id, now,
+    )
     store.write_batch("sentry_details", batch_id, details, {"dataset_version": version}, run_id, now)
     log.info("Sentry details: %d fetched, %d re-used from the previous batch", fetched, reused)
 

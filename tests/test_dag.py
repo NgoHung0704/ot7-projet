@@ -31,6 +31,7 @@ def test_dag_shape(dagbag):
     assert {task.task_id for task in dag.tasks} == {"sentry", "emdat", "geonames", "gem"}
     assert all(not task.upstream_task_ids for task in dag.tasks)
     assert dag.catchup is False
+    assert dag.max_active_runs == 1
     assert {task.task_id: [asset.name for asset in task.outlets] for task in dag.tasks} == {
         "sentry": ["raw_sentry"],
         "emdat": ["raw_emdat"],

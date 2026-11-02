@@ -42,6 +42,7 @@ def batch_args() -> tuple[str, str, datetime]:
     schedule="@monthly",
     start_date=datetime(2026, 11, 1, tzinfo=timezone.utc),
     catchup=False,
+    max_active_runs=1,  # two runs of the same month would delete each other's writes
     tags=["ingestion"],
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
     doc_md=__doc__,
