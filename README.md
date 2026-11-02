@@ -6,40 +6,31 @@ A web game where the player guesses which is deadlier: a real historical disaste
 
 # How to run
 
-Always run Compose **from the repository root**. The root `docker-compose.yml` includes
-each component's compose file (`airflow/docker-compose.yml`, and later others), so a single
-command starts the whole stack.
-
 ## Configuration
 
 Each component has its own `.env` holding everything it needs, and the root `.env` only
 holds settings genuinely shared across components:
 
-| File | Content |
-|---|---|
-| `.env` | `COMPOSE_PROJECT_NAME` (and later any cross-component setting) |
-| `airflow/.env` | Everything Airflow needs: admin account, JWT secret, `_PIP_ADDITIONAL_REQUIREMENTS`, pgAdmin, and its internal `POSTGRES_*` metadata database |
-
-Both are git-ignored. Create them from the templates:
+### Environment configuration:
 
 ```bash
 cp .env.example .env
 cp airflow/.env.example airflow/.env
 ```
+Fill the .env files.
 
-The root compose file lists both files as interpolation sources for the included
-component (`env_file: [.env, airflow/.env]`), so the component file can use the
-project-level variables without duplicating them. Check what Compose actually
-resolves with:
+### First run
 
-```bash
-docker compose config --environment
-```
-
-## First run
+To setup Airflow, run the first time:
 
 ```bash
 docker compose up airflow-init
+```
+
+### Run
+
+```bash
+docker compose up
 ```
 
 ## How to add a Python module in the Airflow container
