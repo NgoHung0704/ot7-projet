@@ -15,7 +15,7 @@ def dagbag():
 
 
 def test_documented_mongo_connection_is_accepted(monkeypatch):
-    """docs/raw-data.md tells the infrastructure to set this exact value."""
+    """The value the Airflow containers must get: the scheme is mongo://, not mongodb://."""
     from airflow.providers.mongo.hooks.mongo import MongoHook
 
     monkeypatch.setenv("AIRFLOW_CONN_MONGO_RAW", "mongo://mongo:27017")

@@ -1,7 +1,7 @@
 """Monthly raw ingestion: Sentry, EM-DAT, GeoNames and GEM into MongoDB (database `raw`).
 
 Each source is an independent task: one failing source does not stop the others.
-A task with nothing new to write ends as skipped. Data contract for staging: docs/raw-data.md.
+A task with nothing new to write ends as skipped.
 """
 
 from contextlib import contextmanager
