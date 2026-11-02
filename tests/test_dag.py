@@ -14,6 +14,14 @@ def dagbag():
     return DagBag(dag_folder=DAGS)
 
 
+def test_documented_mongo_connection_is_accepted(monkeypatch):
+    """docs/raw-data.md tells the infrastructure to set this exact value."""
+    from airflow.providers.mongo.hooks.mongo import MongoHook
+
+    monkeypatch.setenv("AIRFLOW_CONN_MONGO_RAW", "mongo://mongo:27017")
+    MongoHook(mongo_conn_id="mongo_raw").get_conn().close()
+
+
 def test_dag_loads_without_errors(dagbag):
     assert dagbag.import_errors == {}
 
