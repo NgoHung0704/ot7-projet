@@ -5,6 +5,7 @@ import pytest
 import requests
 import responses
 from responses import matchers
+from responses.registries import OrderedRegistry
 
 from ingestion.sentry import SENTRY_URL, SentryFormatError, ingest_sentry
 from ingestion.store import CATALOG, RawStore
@@ -36,8 +37,15 @@ def mock_api(rsps, designations, details, signature=SIGNATURE, changed=()):
                  json=body, status=status)
 
 
-def run(store, now=NOW):
-    return ingest_sentry(store, requests.Session(), "2026-11", "manual__1", now)
+def run(store, now=NOW, min_interval_s=0.0):
+    return ingest_sentry(store, requests.Session(), "2026-11", "manual__1", now, min_interval_s=min_interval_s)
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    calls = []
+    monkeypatch.setattr("ingestion.sentry.time.sleep", calls.append)
+    return calls
 
 
 @pytest.fixture
@@ -112,6 +120,34 @@ def test_details_lost_in_a_failed_run_are_fetched_again(store):
         counts = run(store)
 
     assert (counts["details_fetched"], counts["details_reused"]) == (1, 1)
+
+
+def test_detail_calls_are_spaced(store, sleeps):
+    with responses.RequestsMock() as rsps:
+        mock_api(rsps, ["a", "b", "c"], {des: (200, detail(des)) for des in ["a", "b", "c"]})
+        run(store, min_interval_s=0.5)
+
+    assert len(sleeps) == 2
+    assert all(0.4 < wait <= 0.5 for wait in sleeps)
+
+
+def test_blocked_call_waits_then_resumes(store, sleeps):
+    with responses.RequestsMock(registry=OrderedRegistry) as rsps:
+        mock_api(rsps, ["a", "b"], {"a": (200, detail("a")), "b": (403, {})})
+        rsps.add(responses.GET, SENTRY_URL, match=[matchers.query_param_matcher({"des": "b"})], json=detail("b"))
+        counts = run(store)
+
+    assert sleeps == [60]
+    assert counts["details_fetched"] == 2
+
+
+def test_still_blocked_after_every_wait_fails(store, sleeps):
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        mock_api(rsps, ["a"], {"a": (403, {})})
+        with pytest.raises(requests.HTTPError):
+            run(store)
+
+    assert sleeps == [60, 120, 300, 600]
 
 
 def test_unknown_major_version_fails(store):

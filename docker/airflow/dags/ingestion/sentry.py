@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from datetime import datetime
 
 import requests
@@ -12,6 +13,11 @@ from ingestion.store import RawStore
 SENTRY_URL = "https://ssd-api.jpl.nasa.gov/sentry.api"
 EXPECTED_MAJOR = "2"
 REUSED_META = ("url", "sha256", "retrieved_at", "listing_sha256")
+# JPL's firewall answers 403 after ~180 calls at ~4 calls/s: stay around 2 calls/s, and when
+# blocked anyway, wait for the block to lift instead of failing and starting over.
+MIN_INTERVAL_S = 0.5
+BLOCKED_STATUSES = (403, 429)
+BLOCKED_WAITS_S = (60, 120, 300, 600)
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +42,12 @@ def listing_fingerprint(record: dict) -> str:
 
 
 def _get(session: requests.Session, params: dict) -> tuple[dict, str, str]:
-    response = session.get(SENTRY_URL, params=params, timeout=60)
+    for wait_s in (*BLOCKED_WAITS_S, None):
+        response = session.get(SENTRY_URL, params=params, timeout=60)
+        if response.status_code not in BLOCKED_STATUSES or wait_s is None:
+            break
+        log.warning("Sentry API answered %s (rate limit): waiting %d s", response.status_code, wait_s)
+        time.sleep(wait_s)
     response.raise_for_status()
     return response.json(), response.url, sha256_hex(response.content)
 
@@ -48,7 +59,12 @@ def _reuse(doc: dict) -> dict:
 
 
 def ingest_sentry(
-    store: RawStore, session: requests.Session, batch_id: str, run_id: str, now: datetime
+    store: RawStore,
+    session: requests.Session,
+    batch_id: str,
+    run_id: str,
+    now: datetime,
+    min_interval_s: float = MIN_INTERVAL_S,
 ) -> dict[str, int]:
     listing, url, digest = _get(session, {})
     version = check_version(listing)
@@ -68,12 +84,18 @@ def ingest_sentry(
     # asteroids whose list record changed: a few dozen a month instead of ~2,200.
     previous = {doc["_meta"].get("listing_sha256"): doc for doc in store.read_latest("sentry_details")}
     details, fetched, reused, removed_during_run = [], 0, 0, 0
+    last_call = None
     for obj in listing["data"]:
         fingerprint = listing_fingerprint(obj)
         if fingerprint in previous:
             details.append(_reuse(previous[fingerprint]))
             reused += 1
             continue
+        if last_call is not None:
+            remaining = min_interval_s - (time.monotonic() - last_call)
+            if remaining > 0:
+                time.sleep(remaining)
+        last_call = time.monotonic()
         payload, url, digest = _get(session, {"des": obj["des"]})
         if "error" in payload:
             log.warning("Sentry object %s skipped: %s", obj["des"], payload["error"])
