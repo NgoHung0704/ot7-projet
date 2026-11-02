@@ -1,0 +1,90 @@
+# Builds one Docker image per docker/<service>/Dockerfile
+# and publishes it to GitHub Container Registry: ghcr.io/<owner>/<repo>/<service>.
+#
+# - push to main     -> build + push (tags: latest, sha-<commit>)
+# - tag v1.2.3       -> build + push (tags: 1.2.3, 1.2)
+# - pull request     -> build only (checks that the image still builds)
+# - manual run       -> Actions tab, "Run workflow"
+
+name: Docker images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  discover:
+    name: List images
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.find.outputs.services }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: find
+        name: Find docker/*/Dockerfile
+        run: |
+          services='[]'
+          if [ -d docker ]; then
+            services=$(find docker -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' \
+              | xargs -r -n1 basename | sort | jq -R . | jq -cs .)
+          fi
+          echo "Images found: $services"
+          echo "services=$services" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Image ${{ matrix.service }}
+    needs: discover
+    if: needs.discover.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.discover.outputs.services) }}
+    env:
+      PUSH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to ghcr.io
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # Context = repo root, so a Dockerfile can copy sql/, dags/, app/...
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/${{ matrix.service }}/Dockerfile
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
