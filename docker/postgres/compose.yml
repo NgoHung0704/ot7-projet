@@ -1,0 +1,27 @@
+services:
+  database:
+    image: "postgres:18"
+    ports:
+      - 5433:5432
+
+    env_file:
+      - .env
+
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $${POSTGRES_DB:-$$POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+    networks:
+      - common-inner-network
+
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ../../sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+
+
+volumes:
+  postgres_data:
