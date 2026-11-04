@@ -17,3 +17,11 @@ include:
     env_file:
       - .env
       - docker/airflow/.env
+  - path: docker/mongo/docker-compose.yml
+    env_file:
+      - .env
+      - docker/mongo/.env
+
+networks:
+  inner:
+    driver: bridge
