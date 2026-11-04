@@ -8,6 +8,10 @@ include:
     env_file:
       - .env
       - docker/mongo/.env
+  - path: docker/postgres/compose.yml
+    env_file:
+      - .env
+      - docker/postgres/.env
 
 networks:
   airflow:
