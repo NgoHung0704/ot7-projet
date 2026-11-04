@@ -1,17 +1,3 @@
-# Root Compose project.
-#
-# Each component lives in its own folder with its own compose file and its own
-# .env. `include` loads them as independent Compose projects, so relative paths
-# inside a component file (build: ., ./dags, ...) resolve against that
-# component's folder.
-#
-# `env_file` lists the interpolation sources for the included file, in order of
-# increasing precedence. The root .env holds shared infrastructure settings
-# (POSTGRES_*), the component .env holds component-specific settings.
-#
-# Always run Compose from this directory:
-#   docker compose up -d
-#   docker compose config --environment   # check which values are used
 include:
   - path: docker/airflow/docker-compose.yml
     env_file:
@@ -23,5 +9,9 @@ include:
       - docker/mongo/.env
 
 networks:
-  inner:
+  airflow:
+    driver: bridge
+  mongo:
+    driver: bridge
+  common-inner-network:
     driver: bridge
