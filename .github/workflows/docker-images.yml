@@ -78,10 +78,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      # Context = repo root, so a Dockerfile can copy sql/, dags/, app/...
+      # Context = the image's own folder, like `build: .` in its docker-compose.yml
       - uses: docker/build-push-action@v7
         with:
-          context: .
+          context: docker/${{ matrix.service }}
           file: docker/${{ matrix.service }}/Dockerfile
           push: ${{ env.PUSH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
