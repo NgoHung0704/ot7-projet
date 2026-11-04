@@ -84,6 +84,7 @@ def ingest_emdat(store: RawStore, directory: Path, batch_id: str, run_id: str, n
         return None
 
     records, version = read_workbook(path)
+    log.info("EM-DAT export %s: version %s, %d rows", path.name, version, len(records))
     check_not_shrunk(len(records), previous["n_docs"] if previous else None)
     meta = {"url": path.resolve().as_uri(), "dataset_version": version, "sha256": digest}
     return store.write_batch(COLLECTION, batch_id, records, meta, run_id, now)

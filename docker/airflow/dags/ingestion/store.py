@@ -1,5 +1,6 @@
 """Batch writes into the raw MongoDB database, tracked by the ingest_catalog collection."""
 
+import logging
 from datetime import UTC, datetime
 
 from pymongo.database import Database
@@ -7,6 +8,8 @@ from pymongo.database import Database
 from ingestion.common import new_load_id
 
 CATALOG = "ingest_catalog"
+
+log = logging.getLogger(__name__)
 
 
 class RawStore:
@@ -58,5 +61,7 @@ class RawStore:
             "finished_at": datetime.now(UTC),
         }
         self.db[CATALOG].replace_one({"_id": entry["_id"]}, entry, upsert=True)
-        target.delete_many({"_meta.batch_id": batch_id, "_meta.load_id": {"$ne": load_id}})
+        removed = target.delete_many({"_meta.batch_id": batch_id, "_meta.load_id": {"$ne": load_id}}).deleted_count
+        log.info("%s %s: wrote %d docs, removed %d superseded (load %s)",
+                 collection, batch_id, len(stored), removed, load_id)
         return entry

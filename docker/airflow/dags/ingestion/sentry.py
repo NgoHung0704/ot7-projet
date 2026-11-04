@@ -18,6 +18,7 @@ REUSED_META = ("url", "sha256", "retrieved_at", "listing_sha256")
 MIN_INTERVAL_S = 0.5
 BLOCKED_STATUSES = (403, 429)
 BLOCKED_WAITS_S = (60, 120, 300, 600)
+PROGRESS_EVERY = 100  # a first run makes ~2,200 detail calls: show where it stands
 
 log = logging.getLogger(__name__)
 
@@ -70,30 +71,37 @@ def ingest_sentry(
     version = check_version(listing)
     removed, removed_url, removed_digest = _get(session, {"removed": "1"})
     check_version(removed)
+    total = len(listing["data"])
+    log.info("Sentry list: %d asteroids, %d removed objects", total, len(removed["data"]))
 
     # One call at a time (JPL asks clients not to send parallel requests), and only for the
     # asteroids whose list record changed: a few dozen a month instead of ~2,200.
     previous = {doc["_meta"].get("listing_sha256"): doc for doc in store.read_latest("sentry_details")}
-    details, fetched, reused, removed_during_run = [], 0, 0, 0
+    details, fetched, reused, removed_during_run, calls = [], 0, 0, 0, 0
     last_call = None
-    for obj in listing["data"]:
+    for done, obj in enumerate(listing["data"], start=1):
         fingerprint = listing_fingerprint(obj)
         if fingerprint in previous:
             details.append(_reuse(previous[fingerprint]))
             reused += 1
-            continue
-        if last_call is not None:
-            remaining = min_interval_s - (time.monotonic() - last_call)
-            if remaining > 0:
-                time.sleep(remaining)
-        last_call = time.monotonic()
-        payload, url, digest = _get(session, {"des": obj["des"]})
-        if "error" in payload:
-            log.warning("Sentry object %s skipped: %s", obj["des"], payload["error"])
-            removed_during_run += 1
-            continue
-        details.append({**payload, "_meta": {"url": url, "sha256": digest, "listing_sha256": fingerprint}})
-        fetched += 1
+        else:
+            calls += 1
+            if last_call is not None:
+                remaining = min_interval_s - (time.monotonic() - last_call)
+                if remaining > 0:
+                    time.sleep(remaining)
+            last_call = time.monotonic()
+            payload, url, digest = _get(session, {"des": obj["des"]})
+            if "error" in payload:
+                log.warning("Sentry object %s skipped: %s", obj["des"], payload["error"])
+                removed_during_run += 1
+            else:
+                details.append({**payload, "_meta": {"url": url, "sha256": digest, "listing_sha256": fingerprint}})
+                fetched += 1
+        # After every PROGRESS_EVERY detail calls, and once at the end
+        just_called = fingerprint not in previous
+        if (just_called and calls % PROGRESS_EVERY == 0) or done == total:
+            log.info("Sentry details %d/%d: %d fetched, %d re-used", done, total, fetched, reused)
 
     # Written together once everything is fetched: staging never sees this month's list
     # next to last month's details.
@@ -106,7 +114,6 @@ def ingest_sentry(
         {"url": removed_url, "dataset_version": version, "sha256": removed_digest}, run_id, now,
     )
     store.write_batch("sentry_details", batch_id, details, {"dataset_version": version}, run_id, now)
-    log.info("Sentry details: %d fetched, %d re-used from the previous batch", fetched, reused)
 
     return {
         "sentry_objects": len(listing["data"]),
