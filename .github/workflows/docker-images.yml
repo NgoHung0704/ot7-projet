@@ -78,7 +78,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      # Context = the image's own folder, like `build: .` in its docker-compose.yml
       - uses: docker/build-push-action@v7
         with:
           context: docker/${{ matrix.service }}
