@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 import mongomock
@@ -50,11 +51,13 @@ def store():
     return RawStore(mongomock.MongoClient()["raw"])
 
 
-def test_ingest_downloads_all_adm1_files(store):
+def test_ingest_downloads_all_adm1_files(store, caplog):
+    caplog.set_level(logging.INFO, logger="ingestion")
     with responses.RequestsMock() as rsps:
         mock_repo(rsps)
         assert run(store) == 4
 
+    assert "GEM commit e2a74b9ff5: downloading 2 admin-1 files" in caplog.text
     docs = store.read_latest("gem_exposure_adm1")
     france_res = next(d for d in docs if d["ID_1"] == "FR-ARA" and d["OCCUPANCY"] == "RES")
     assert france_res["OCCUPANTS_TOTAL"] == "2500"

@@ -50,8 +50,10 @@ def ingest_gem(store: RawStore, session: requests.Session, batch_id: str, run_id
         log.info("GEM unchanged since batch %s (commit %s)", previous["batch_id"], sha[:10])
         return None
 
+    paths = adm1_paths(session, sha)
+    log.info("GEM commit %s: downloading %d admin-1 files", sha[:10], len(paths))
     docs = []
-    for path in adm1_paths(session, sha):
+    for path in paths:
         response = session.get(f"{RAW_URL}/{sha}/{path}", timeout=60)
         response.raise_for_status()
         meta = {"url": response.url, "sha256": sha256_hex(response.content)}

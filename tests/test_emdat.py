@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import UTC, datetime
 
@@ -76,11 +77,13 @@ def test_no_file_skips(store, tmp_path):
     assert store.db[CATALOG].count_documents({}) == 0
 
 
-def test_same_file_twice_skips_second_time(store, tmp_path):
+def test_same_file_twice_skips_second_time(store, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="ingestion")
     make_workbook(tmp_path / "public_emdat.xlsx")
 
     entry = ingest(store, tmp_path)
     assert entry["n_docs"] == 4
+    assert "EM-DAT export public_emdat.xlsx: version 2026-11-01, 4 rows" in caplog.text
     assert entry["dataset_version"] == "2026-11-01"
     assert ingest(store, tmp_path) is None
     assert store.db["emdat_events"].count_documents({}) == 4

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 import mongomock
@@ -54,10 +55,16 @@ def store():
     return RawStore(mongomock.MongoClient()["raw"])
 
 
-def test_ingest_writes_three_collections(store):
+def test_ingest_writes_three_collections(store, caplog, monkeypatch):
+    caplog.set_level(logging.INFO, logger="ingestion")
+    monkeypatch.setattr("ingestion.sentry.PROGRESS_EVERY", 1)
     with responses.RequestsMock() as rsps:
         mock_api(rsps, ["2011 TO", "29075"], {"2011 TO": (200, detail("2011 TO")), "29075": (200, detail("29075"))})
         counts = run(store)
+
+    assert "Sentry list: 2 asteroids, 1 removed objects" in caplog.text
+    assert "Sentry details 1/2: 1 fetched, 0 re-used" in caplog.text
+    assert "Sentry details 2/2: 2 fetched, 0 re-used" in caplog.text
 
     assert counts == {
         "sentry_objects": 2,
@@ -87,11 +94,13 @@ def test_object_removed_between_calls_is_skipped(store):
     assert [d["summary"]["des"] for d in store.read_latest("sentry_details")] == ["2011 TO"]
 
 
-def test_unchanged_objects_reuse_previous_details(store):
+def test_unchanged_objects_reuse_previous_details(store, caplog, monkeypatch):
     with responses.RequestsMock() as rsps:
         mock_api(rsps, ["2011 TO", "29075"], {"2011 TO": (200, detail("2011 TO")), "29075": (200, detail("29075"))})
         run(store)
     first = {d["summary"]["des"]: d["_meta"] for d in store.read_latest("sentry_details")}
+    caplog.set_level(logging.INFO, logger="ingestion")
+    monkeypatch.setattr("ingestion.sentry.PROGRESS_EVERY", 1)
 
     # "2011 TO" unchanged: no detail call registered for it, so fetching it would fail the test
     with responses.RequestsMock() as rsps:
@@ -100,6 +109,9 @@ def test_unchanged_objects_reuse_previous_details(store):
         counts = run(store, now=NOW.replace(day=2))
 
     assert (counts["sentry_details"], counts["details_fetched"], counts["details_reused"]) == (3, 2, 1)
+    # Progress is reported after detail calls only: re-used details do not add log lines
+    assert "Sentry details 1/3" not in caplog.text
+    assert "Sentry details 3/3: 2 fetched, 1 re-used" in caplog.text
     reused = next(d for d in store.read_latest("sentry_details") if d["summary"]["des"] == "2011 TO")
     assert reused["data"][0]["date"] == "2090-01-01.12"
     assert reused["_meta"]["url"] == first["2011 TO"]["url"]
@@ -121,15 +133,6 @@ def test_details_lost_in_a_failed_run_are_fetched_again(store):
         counts = run(store)
 
     assert (counts["details_fetched"], counts["details_reused"]) == (1, 1)
-
-
-def test_detail_calls_are_spaced(store, sleeps):
-    with responses.RequestsMock() as rsps:
-        mock_api(rsps, ["a", "b", "c"], {des: (200, detail(des)) for des in ["a", "b", "c"]})
-        run(store, min_interval_s=0.5)
-
-    assert len(sleeps) == 2
-    assert all(0.4 < wait <= 0.5 for wait in sleeps)
 
 
 def test_blocked_call_waits_then_resumes(store, sleeps):

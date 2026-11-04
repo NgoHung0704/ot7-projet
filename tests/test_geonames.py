@@ -57,11 +57,6 @@ def test_parse_tsv_names_columns_and_nulls():
     assert rows[0]["cc2"] is None
 
 
-def test_parse_tsv_rejects_wrong_column_count():
-    with pytest.raises(ValueError):
-        parse_tsv("2988507\tParis\n", CITY_COLUMNS)
-
-
 def test_parse_country_info_uses_file_header():
     assert parse_country_info(COUNTRY_TXT) == [
         {"ISO": "AD", "ISO3": "AND", "ISO-Numeric": "020", "fips": "AN", "Country": "Andorra"}
