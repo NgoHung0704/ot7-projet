@@ -13,7 +13,7 @@
 #   docker compose up -d
 #   docker compose config --environment   # check which values are used
 include:
-  - path: airflow/docker-compose.yml
+  - path: docker/airflow/docker-compose.yml
     env_file:
       - .env
-      - airflow/.env
+      - docker/airflow/.env
