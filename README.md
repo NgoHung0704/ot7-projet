@@ -1,25 +1,26 @@
 # Asteroid impacts vs. historical disasters
 
-OT7 Data Engineering, INSA Lyon — Project 1: data architecture and dimensional model.
+OT7 Data Engineering, INSA Lyon
 
-A web game where the player guesses which is deadlier: a real historical disaster (EM-DAT) or the simulated impact of an asteroid from NASA's Sentry risk list on a major city. The full design is in the report.
+A web game where the player guesses which is deadlier: a real historical disaster (EM-DAT) or the simulated impact of an asteroid from NASA's Sentry risk list on a major city. 
 
 # How to run
 
-## Configuration
+### Download EM dat dataset
 
-Each component has its own `.env` holding everything it needs, and the root `.env` only
-holds settings genuinely shared across components:
+TODO: link + instruction to put it in the right folder
 
-### Environment configuration:
+### Environment configuration
 
 ```bash
 cp .env.example .env
 cp airflow/.env.example airflow/.env
+cp mongo/.env.example mongo/.env
+cp postgres/.env.example postgres/.env
 ```
-Fill the .env files.
+Fill the .env files accordingly.
 
-### First run
+### Airflow first run
 
 To setup Airflow, run the first time:
 
@@ -33,45 +34,16 @@ docker compose up airflow-init
 docker compose up
 ```
 
-## How to add a Python module in the Airflow container
+# Pipeline details
 
-Add the python module in the `airflow/requirements.txt`
+## Overview
 
-# Details
+TODO: put a diagram showing the whole pipeline 
 
-## Star schema
+## Airflow
 
-- `fact_event_toll`: one event at one place, either one historical disaster in one country or one asteroid striking one city. Measures: `deaths`, `damage_usd`.
-- `dim_event`: name, origin (Historical or Simulated), disaster type, intensity (magnitude, wind speed and their classes), and the asteroid attributes.
-- `dim_location`: city or country of the event.
-- `dim_date`: calendar.
-| `docker/<service>/Dockerfile` | One Docker image per service, built by CI |
-| `.github/workflows/docker-images.yml` | CI: builds and publishes the images |
+TODO: describe the airflow DAG
 
-## Docker images
+## Postgres & mongo
 
-Every push to `main` rebuilds each `docker/<service>/Dockerfile` and publishes it to GitHub Container Registry:
-
-```
-ghcr.io/ngohung0704/ot7-projet/<service>:latest       # last commit on main
-ghcr.io/ngohung0704/ot7-projet/<service>:sha-<commit>  # a precise commit
-ghcr.io/ngohung0704/ot7-projet/<service>:1.2.3         # a v1.2.3 git tag
-```
-
-Pull requests only build the images, to check that they still build. The build context is the repository root, so a Dockerfile can copy any folder (`COPY sql/schema.sql ...`).
-
-**Add an image:** create `docker/<name>/Dockerfile` and push. No workflow change needed. Renaming the folder renames the image.
-
-| Image | Content |
-|---|---|
-| `app` | Placeholder, to be written |
-
-```bash
-docker pull ghcr.io/ngohung0704/ot7-projet/app:latest
-```
-
-## Sources
-
-- NASA/JPL Sentry API: https://ssd-api.jpl.nasa.gov/doc/sentry.html
-- EM-DAT, CRED / UCLouvain: https://doc.emdat.be/
-- ImpactEffect Python module: https://github.com/Daniel-Xing/impact-effects
+TODO: justify the use
