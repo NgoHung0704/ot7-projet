@@ -70,6 +70,8 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # Raw data store used by the ingest_raw DAG (the scheme must be mongo://, not mongodb://)
     AIRFLOW_CONN_MONGO_RAW: mongo://${MONGO_ROOT_USERNAME:-root}:${MONGO_ROOT_PASSWORD:-example}@mongo:27017/?authSource=admin
+    # Warehouse used by the staging DAG (service `database`), set in docker/airflow/.env
+    AIRFLOW_CONN_POSTGRES_WAREHOUSE: ${AIRFLOW_CONN_POSTGRES_WAREHOUSE}
     # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
     # for other purpose (development, test and especially production usage) build/extend Airflow image.
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
