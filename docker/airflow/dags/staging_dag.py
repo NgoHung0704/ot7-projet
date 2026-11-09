@@ -36,7 +36,7 @@ def run_stage(task_name: str, inputs: list[str], build) -> dict[str, int]:
     context = get_current_context()
     with connections() as (store, warehouse):
         result = stage(warehouse, store, task_name, inputs, build, context["run_id"],
-                       context["params"]["max_reject_rate"])
+                       context["params"]["max_reject_rate"], force=context["params"]["force"])
     if result.status != "built":
         raise AirflowSkipException(result.detail)
     return result.counts
@@ -49,7 +49,9 @@ def run_stage(task_name: str, inputs: list[str], build) -> dict[str, int]:
     catchup=False,
     max_active_runs=1,
     tags=["staging"],
-    params={"cities_per_continent": 15, "capital_min_population": 1_000_000, "max_reject_rate": 0.10},
+    # force: rebuild even if the raw inputs did not change (trigger by hand after fixing the staging code)
+    params={"cities_per_continent": 15, "capital_min_population": 1_000_000, "max_reject_rate": 0.10,
+            "force": False},
     doc_md=__doc__,
 )
 def staging():

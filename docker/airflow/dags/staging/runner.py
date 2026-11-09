@@ -54,14 +54,20 @@ def city_tables(data: dict[str, list[dict]], per_continent: int, capital_min_pop
 
 
 def stage(conn, store: RawStore, task: str, inputs: list[str], build: Build, run_id: str,
-          max_reject_rate: float) -> StageResult:
+          max_reject_rate: float, force: bool = False) -> StageResult:
+    """`force` rebuilds even when the raw inputs did not change (after a fix in the staging code)."""
     entries = {collection: store.latest_complete(collection) for collection in inputs}
     missing = [collection for collection, entry in entries.items() if entry is None]
     if missing:
         return StageResult("waiting", f"waiting for raw {', '.join(missing)}: no complete batch yet")
 
+    # An empty batch (an API answering []) must not wipe a table and wake up the steps downstream
+    empty = [f"{collection} (batch {entry['batch_id']})" for collection, entry in entries.items() if not entry["n_docs"]]
+    if empty:
+        return StageResult("waiting", f"raw {', '.join(empty)} is empty: nothing to build")
+
     load_ids = {collection: entry["load_id"] for collection, entry in entries.items()}
-    if last_inputs(conn, task) == load_ids:
+    if not force and last_inputs(conn, task) == load_ids:
         return StageResult("unchanged", f"raw inputs unchanged since the last build: {', '.join(inputs)}")
 
     data = {}

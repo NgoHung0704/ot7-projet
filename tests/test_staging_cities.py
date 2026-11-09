@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from staging.cities import build_cities, match_gem_region, normalize_region, select_cities
@@ -39,7 +41,7 @@ def build(cities):
 
 def test_normalize_drops_generic_whole_words():
     assert normalize_region("State of Berlin") == "berlin"
-    assert normalize_region("Île-de-France") == "iledefrance"
+    assert normalize_region("Île-de-France") == "ilefrance"
     assert normalize_region("Athens") == "athens"
     assert normalize_region(None) == ""
 
@@ -48,6 +50,25 @@ def test_match_by_containment():
     assert match_gem_region(["Moscow"], {"RU-MOW": "Moscow City", "RU-MOS": "Moskovskaya"}) == "RU-MOW"
     assert match_gem_region(["Mazovia"], {"PL-MZ": "Mazowieckie"}) is None
     assert match_gem_region([None, "Greater Tokyo"], {"JP-13": "Tokyo"}) == "JP-13"
+
+
+def test_capital_district_never_gets_the_province_of_the_same_name():
+    # Real GEM names: the city district and the surrounding province normalize alike -> ambiguous -> country
+    mexico = {"MX-CMX": "Ciudad de México", "MX-MEX": "México"}
+    assert match_gem_region(["Mexico City", "Mexico City", "Mexico City"], mexico) is None
+    argentina = {"AR-C": "Ciudad Autónoma de Buenos Aires", "AR-B": "Buenos Aires"}
+    assert match_gem_region(["Buenos Aires F.D.", "Buenos Aires F.D.", "Buenos Aires"], argentina) is None
+
+
+def test_region_name_is_tried_before_the_city_name():
+    dominican = {"DO-01": "Distrito Nacional", "DO-32": "Santo Domingo"}
+    assert match_gem_region(["Nacional", "Nacional", "Santo Domingo"], dominican) == "DO-01"
+
+
+def test_match_rate_is_logged(caplog):
+    caplog.set_level(logging.INFO, logger="staging")
+    build([city(1, "Paris", "FR", 2_100_000, admin1="11"), city(3, "Berlin", "DE", 3_400_000, admin1="16")])
+    assert "GEM region found for 1 of 2 cities; country average for: Berlin" in caplog.text
 
 
 def test_select_cities_per_continent_and_capitals():

@@ -1,5 +1,6 @@
 """GeoNames cities + GEM admin-1 summaries → stg_city rows (the impact cities of the game)."""
 
+import logging
 import re
 import unicodedata
 from collections import defaultdict
@@ -18,10 +19,13 @@ CITY_COLUMNS = [
 GENERIC_WORDS = {
     "city", "state", "of", "province", "region", "oblast", "governorate", "division", "district", "prefecture",
     "municipality", "capital", "metropolitan", "federal", "the", "special", "administrative",
+    "ciudad", "autonoma", "de",
 }
 GEM_SUMS = {"occupants": "OCCUPANTS_TOTAL", "buildings": "BUILDINGS", "repl_cost_usd": "TOTAL_REPL_COST_USD"}
 # GEM's World file repeats every country's regions; raw batches ingested before it was excluded still hold it
 GEM_WORLD_FILE = "/World/summaries/"
+
+log = logging.getLogger(__name__)
 
 
 def normalize_region(name: str | None) -> str:
@@ -30,17 +34,25 @@ def normalize_region(name: str | None) -> str:
 
 
 def match_gem_region(candidates: list[str | None], regions: dict[str, str]) -> str | None:
-    """GEM region ID_1 whose name matches a candidate: equal first, then one name containing the other."""
-    names = [normalize_region(c) for c in candidates if normalize_region(c)]
+    """GEM region ID_1 matching the first candidate that matches anything (region names before the city name).
+
+    Equal names first, then one name containing the other. When several GEM regions match, the name is
+    ambiguous ("Mexico City": "Ciudad de México" and the State of "México") and None is returned, so the city
+    falls back to its country rather than to the wrong region.
+    """
     gem = {id_1: normalize_region(name) for id_1, name in regions.items()}
-    for name in names:
-        for id_1, gem_name in gem.items():
-            if name == gem_name:
-                return id_1
-    for name in names:
-        for id_1, gem_name in gem.items():
-            if gem_name and len(min(name, gem_name, key=len)) >= 4 and (name in gem_name or gem_name in name):
-                return id_1
+    for candidate in candidates:
+        name = normalize_region(candidate)
+        if not name:
+            continue
+        equal = [id_1 for id_1, gem_name in gem.items() if gem_name == name]
+        contained = [
+            id_1 for id_1, gem_name in gem.items()
+            if gem_name and len(min(name, gem_name, key=len)) >= 4 and (name in gem_name or gem_name in name)
+        ]
+        found = equal or contained
+        if found:
+            return found[0] if len(found) == 1 else None
     return None
 
 
@@ -118,4 +130,7 @@ def build_cities(cities: list[dict], countries: list[dict], admin1: list[dict], 
             **({key: totals[key] for key in GEM_SUMS} if totals else dict.fromkeys(GEM_SUMS)),
             "repl_cost_per_occupant_usd": _per_occupant(totals or country_totals[iso3]),
         })
+    fallback = [row["name"] for row in rows if row["gem_level"] == "country"]
+    log.info("GEM region found for %d of %d cities; country average for: %s",
+             len(rows) - len(fallback), len(rows), ", ".join(fallback) or "none")
     return rows, rejects

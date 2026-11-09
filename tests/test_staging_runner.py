@@ -46,12 +46,32 @@ def test_waiting_when_raw_missing(conn, store):
         assert cur.fetchone()[0] is None
 
 
+def test_empty_raw_batch_builds_nothing(conn, store):
+    write(store, [emdat("a")], minute=4)
+    run(conn, store)
+    write(store, [], minute=5)
+
+    result = run(conn, store, "run2")
+    assert result.status == "waiting"
+    assert "empty" in result.detail
+    assert disasters_in(conn) == ["a"]
+
+
 def test_built_then_unchanged(conn, store):
     write(store, [emdat("a"), emdat("b")], minute=4)
 
     first = run(conn, store)
     assert (first.status, first.counts) == ("built", {"stg_disaster": 2})
     assert run(conn, store, "run2").status == "unchanged"
+
+
+def test_force_rebuilds_unchanged_inputs(conn, store):
+    """After a fix in the staging code, the same raw batch must be rebuilt on demand."""
+    write(store, [emdat("a")], minute=4)
+    run(conn, store)
+
+    result = stage(conn, store, "disasters", INPUTS, disaster_tables, "run2", max_reject_rate=0.10, force=True)
+    assert result.status == "built"
 
 
 def test_new_batch_rebuilds(conn, store):
