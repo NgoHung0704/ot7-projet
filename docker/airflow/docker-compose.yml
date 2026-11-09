@@ -371,6 +371,7 @@ services:
       - "${PGADMIN_PORT}:80" # type localhost:5050 to your browser to access the UI
     networks:
       - airflow
+      - common-inner-network
 
 # Network definitions live in the root docker-compose.yml, which is the single
 # source of truth. `include` merges by key, so declaring them here as well would
