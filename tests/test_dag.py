@@ -38,3 +38,18 @@ def test_dag_shape(dagbag):
         "geonames": ["raw_geonames"],
         "gem": ["raw_gem"],
     }
+
+
+def test_staging_dag_shape(dagbag):
+    dag = dagbag.dags["staging"]
+    assert {task.task_id for task in dag.tasks} == {"asteroids", "disasters", "cities"}
+    assert all(not task.upstream_task_ids for task in dag.tasks)
+    assert dag.catchup is False
+    assert dag.max_active_runs == 1
+    assert type(dag.timetable).__name__ == "AssetTriggeredTimetable"
+    assert {task.task_id: [asset.name for asset in task.outlets] for task in dag.tasks} == {
+        "asteroids": ["stg_asteroid"],
+        "disasters": ["stg_disaster"],
+        "cities": ["stg_city"],
+    }
+    assert dag.params["cities_per_continent"] == 15
