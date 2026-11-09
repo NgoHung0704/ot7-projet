@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 
+from staging.convert import to_float, to_int
 from staging.quality import reject
 
 SOURCE = "sentry"
@@ -10,19 +11,6 @@ ASTEROID_COLUMNS = [
     "impact_probability", "impact_date", "n_impacts", "last_obs",
 ]
 REMOVED_COLUMNS = ["des", "removed_at"]
-
-
-def to_float(value) -> float | None:
-    """Sentry sends numbers as text ("1.4e-05")."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def to_int(value) -> int | None:
-    number = to_float(value)
-    return None if number is None else int(number)
 
 
 def parse_sentry_date(value: str | None) -> date | None:
