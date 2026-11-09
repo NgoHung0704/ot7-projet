@@ -1,18 +1,13 @@
-"""Needs a PostgreSQL: set WAREHOUSE_TEST_DSN (e.g. the local `database` service on port 5433)."""
+"""Needs a PostgreSQL: the `conn` fixture (conftest.py) reads WAREHOUSE_TEST_DSN."""
 
-import os
 from datetime import UTC, datetime
 
 import mongomock
 import pytest
 
-DSN = os.environ.get("WAREHOUSE_TEST_DSN")
-pytestmark = pytest.mark.skipif(not DSN, reason="WAREHOUSE_TEST_DSN not set")
-psycopg2 = pytest.importorskip("psycopg2")
-
-from ingestion.store import RawStore  # noqa: E402
-from staging.quality import StagingQualityError  # noqa: E402
-from staging.runner import disaster_tables, stage  # noqa: E402
+from ingestion.store import RawStore
+from staging.quality import StagingQualityError
+from staging.runner import disaster_tables, stage
 
 NOW = datetime(2026, 11, 1, 0, 3, tzinfo=UTC)
 INPUTS = ["emdat_events"]
@@ -20,15 +15,6 @@ INPUTS = ["emdat_events"]
 
 def emdat(dis_no, year=2020):
     return {"DisNo": dis_no, "Start Year": year, "Start Month": 8, "Start Day": 4, "Total Deaths": 1}
-
-
-@pytest.fixture
-def conn():
-    connection = psycopg2.connect(DSN)
-    with connection, connection.cursor() as cur:
-        cur.execute("DROP SCHEMA IF EXISTS staging CASCADE")
-    yield connection
-    connection.close()
 
 
 @pytest.fixture

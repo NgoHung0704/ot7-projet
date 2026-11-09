@@ -10,7 +10,14 @@ from staging.asteroids import ASTEROID_COLUMNS, REMOVED_COLUMNS, build_asteroids
 from staging.cities import CITY_COLUMNS, build_cities
 from staging.disasters import DISASTER_COLUMNS, build_disasters
 from staging.quality import check_reject_rate
-from staging.warehouse import ensure_schema, last_inputs, record_inputs, replace_quarantine, replace_table
+from staging.warehouse import (
+    ensure_schema,
+    last_inputs,
+    record_inputs,
+    replace_quarantine,
+    replace_table,
+    transaction,
+)
 
 # Table whose row count the reject rate of each source is measured against
 CHECKED_TABLE = {"sentry": "stg_asteroid", "emdat": "stg_disaster", "cities": "stg_city"}
@@ -66,7 +73,7 @@ def stage(conn, store: RawStore, task: str, inputs: list[str], build: Build, run
     for source, rejects in rejects_by_source.items():
         check_reject_rate(source, len(tables[CHECKED_TABLE[source]][1]), len(rejects), max_reject_rate)
 
-    with conn:
+    with transaction(conn):
         ensure_schema(conn)
         counts = {table: replace_table(conn, table, columns, rows) for table, (columns, rows) in tables.items()}
         for source, rejects in rejects_by_source.items():
