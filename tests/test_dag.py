@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("airflow")
+pytest.importorskip("airflow.dag_processing.dagbag")
 
 from airflow.dag_processing.dagbag import DagBag  # noqa: E402
 
@@ -53,3 +53,18 @@ def test_staging_dag_shape(dagbag):
         "cities": ["stg_city"],
     }
     assert dag.params["cities_per_continent"] == 15
+
+
+def test_simulation_dag_shape(dagbag):
+    dag = dagbag.dags["simulation"]
+    assert {task.task_id for task in dag.tasks} == {"simulate_impacts"}
+    assert dag.catchup is False
+    assert dag.max_active_runs == 1
+    assert type(dag.timetable).__name__ == "AssetTriggeredTimetable"
+    assert [asset.name for asset in dag.tasks[0].outlets] == ["simulation_results"]
+
+
+def test_simulation_accepts_each_source_without_another_publication(dagbag):
+    condition = dagbag.dags["simulation"].timetable.asset_condition
+    assert type(condition).__name__ in {"AssetAny", "SerializedAssetAny"}
+    assert {asset.name for asset in condition.objects} == {"stg_asteroid", "stg_city", "stg_disaster"}

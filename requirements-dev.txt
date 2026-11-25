@@ -6,3 +6,5 @@ pymongo==4.19.0
 pytest==9.2.0
 requests==2.34.2
 responses==0.26.3
+ImpactEffect==1.0.0
+numpy==2.5.3

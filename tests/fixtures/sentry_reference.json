@@ -1,0 +1,30 @@
+{
+  "retrieved_on": "2026-11-25",
+  "source": "https://ssd-api.jpl.nasa.gov/sentry.api",
+  "asteroids": [
+    {
+      "des": "2025 DB15",
+      "diameter_m": 20.0,
+      "entry_speed_kms": 12.85,
+      "energy_mt": 0.1968,
+      "mass_kg": 10000000.0,
+      "source_url": "https://ssd-api.jpl.nasa.gov/sentry.api?des=2025+DB15"
+    },
+    {
+      "des": "2005 NX55",
+      "diameter_m": 140.36352926696298,
+      "entry_speed_kms": 27.19,
+      "energy_mt": 334.7,
+      "mass_kg": 3800000000.0,
+      "source_url": "https://ssd-api.jpl.nasa.gov/sentry.api?des=2005+NX55"
+    },
+    {
+      "des": "2010 ER12",
+      "diameter_m": 1013.1039349161499,
+      "entry_speed_kms": 26.37,
+      "energy_mt": 120000.0,
+      "mass_kg": 1440000000000.0,
+      "source_url": "https://ssd-api.jpl.nasa.gov/sentry.api?des=2010+ER12"
+    }
+  ]
+}

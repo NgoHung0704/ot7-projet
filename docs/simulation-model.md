@@ -1,264 +1,127 @@
-# Simulation model discussion — Issue #11
+# Simulation model — issues #11 and #12
 
-Status: **DRAFT — under discussion, nothing is final yet.**
+Implementation: `docker/airflow/dags/simulation/`. Version: `educational_bands_v1`.
 
-This document proposes a modeling approach for estimating `deaths` and
-`damage_usd` of a simulated asteroid impact on a city, and lists the open
-questions the team must settle before we implement anything. Nothing here is
-challenged as "decided" until the team signs it off.
+This educational scenario asks: **if this asteroid strikes this city**, what are its immediate fatalities and direct building replacement losses? It is not a NASA city-impact prediction. Impact probability does not multiply the toll. Coefficients below are implementation assumptions, not calibrated fatality or fragility curves.
 
-The goal is an **order-of-magnitude estimate**, not an exact physics
-simulation. Consequences per event = deaths + material damage, in the same
-units as the historical disasters we load from EM-DAT, so the game can compare
-the two.
+## Inputs and assumptions
 
-## 1. Key finding: no single library does it all
+- Read `staging.stg_asteroid`, `staging.stg_city` and `staging.stg_disaster`.
+- Diameter in metres, **entry** velocity `v_imp` in km/s; density **2600 kg/m³**, angle **45°**, dry-land target density **2500 kg/m³**, water depth zero.
+- Do not infer density from Sentry mass. `energy_mt` is an independent validation reference, not the physics input.
+- Simulate every staged asteroid, including small airbursts with zero toll under this model.
+- Regional GEM: exposed population = region `occupants`. Country GEM: exposed population = city `population`; country occupants is deliberately NULL.
+- Spread exposed population uniformly over a disc centred on the city's coordinates. No area is available in staging, so assume **3000 persons/km²**: `R = sqrt(N/(pi*3000))`. This is a scenario area, not an observed city or GEM-region boundary. It does not recover the real spatial distribution of regional occupants.
+- Exposed assets = exposed population × `repl_cost_per_occupant_usd`. Missing/nonfinite/negative required inputs fail the build; zero exposure gives zero toll.
 
-We surveyed available tools. **None of the verifiable sources provide a
-ready-made Python library that takes Sentry data plus coordinates and returns
-both deaths and damage in USD.** We must compose several model layers, and the
-economic-loss layer in particular is on us.
+These are implementation choices for a reviewable MVP. Changing them requires a model-version update and rebuild. A spatial exposure grid requires additional geographic data; a complete vulnerability framework exceeds the current staging contract.
 
-| Candidate | What it provides | What is missing | Verdict for us |
-|---|---|---|---|
-| `ImpactEffect` (PyPI) | Physical effects of the impact (airburst altitude, peak overpressure, max wind velocity, etc.) at a distance from impact | No casualty pipeline, no monetary loss | Good candidate for the **physics layer**; must be smoke-tested before we commit |
-| Rumpf vulnerability models (`c-type/asteroid_impact_vulnerability`) | Fatality fraction of a population exposed to a given level of each effect (wind, overpressure, thermal, cratering, seismic shaking, ejecta) | Needs physical effects + spatial population as inputs; no USD | Closest verified match for the **deaths layer** |
-| ARMOR (Rumpf et al. 2017) | Full research framework: probability + effects + population + vulnerability | No installable package verified | Methodological reference only; do not plan around `pip install armor` |
-| GEM Global Exposure Model | Building counts, occupants, replacement costs per ~1 km cell (residential / commercial / industrial) | Not an asteroid model; no damage ratios | Candidate source for the **exposure layer** (population and assets) |
-| OpenQuake | Structural/non-structural/contents loss and casualties for scenario risk | Needs exposure + vulnerability matched to a shaking field; does not handle blast/thermal | Overkill for MVP; possible later extension for the seismic branch only |
-| pelicun | Python damage/loss framework (FEMA P-58 based) | We must supply demand, fragility, consequence models | Possible later upgrade for the loss layer |
-| NASA PAIR | Probabilistic risk over many scenarios | No ready Python API; "affected population" is not deaths | Methodological reference for limitations |
-| Purdue Impact: Earth! | The reference implementation `ImpactEffect` reimplements | Web calculator, not a library | Used as **validation benchmark** for our physics outputs |
+## Physics
 
-## 2. Proposed architecture: three composed layers
+[ImpactEffect 1.0.0](https://pypi.org/project/ImpactEffect/1.0.0/) implements the [Collins, Melosh & Marcus (2005) Earth Impact Effects Program](https://doi.org/10.1111/j.1945-5100.2005.tb00157.x). Use numeric functions, not its interactive report.
 
-```
-Asteroid (diameter, mass, v_imp, density) + scenario assumptions
-                     |
-                     v
-   [1. PHYSICS]  ImpactEffect  -> effect intensities per distance
-                     |
-                     v
-   [2. FATALITY] Rumpf models  -> deaths per cell, combined
-                     |
-                     v
-   [3. ECONOMIC]  exposure x loss ratios -> damage_usd
-                     |
-                     v
-     fact_event_toll row (origin = 'Simulated')
-```
+- `cal_vmax` returns `(wind_m_per_second, overpressure_pa)`; convert wind with **×3.6**.
+- `cal_themal` returns a mantissa and decimal exponent; reconstruct **J/m²**.
+- Surface impacts with residual velocity ≥15 km/s use the fireball model. Airbursts have no surface fireball and no ground-impact seismic magnitude in this implementation. Real airburst thermal effects are omitted.
+- Check the fireball horizon before calling the library: its thermal function otherwise calls `acos` outside its domain.
+- Restore the removed `numpy.Inf` alias before importing the old library. Keep NumPy **2.5.3**, compatible with the Airflow image's SciPy; downgrading to NumPy 1.x caused a conflict.
+- Solve band radii with 32 bisection steps from 1 m to 20,000 km, assuming radially decreasing hazard fields. A threshold still exceeded at the domain limit fails rather than silently truncating the radius.
+- Cache physics by diameter and entry speed, independently of city; clear the cache at each DAG build.
 
-Each layer sits behind its own thin Python adapter, so we can swap
-`ImpactEffect`, retune the fatality model, or upgrade the loss model without
-touching the Airflow orchestration.
+Magnitude is the ground-impact source magnitude, not local shaking intensity. Wind is measured at **1 km from ground zero**, as #12 requests. For large objects this is inside the crater/fireball: extreme near-field wind values are formal model extrapolations, unsuitable as literal weather predictions.
 
-### 2.1 Physics layer — `ImpactEffect`
+## Casualty and building-loss rules
 
-- PyPI: `ImpactEffect==1.0.0` (2022-09-15, Python >= 3.7, MIT license).
-  Reimplements the Purdue Earth Impact Effects Program (Melosh et al.).
-- **What it gives us**: overpressure, wind velocity, thermal radiation,
-  airburst altitude, crater size, seismic magnitude — as functions of distance
-  from the impact point.
-- **What it does not give us**: no `estimate_deaths()` function, and its
-  "damage" descriptions ("glass windows may shatter") are not USD values.
-- Doc examples show some import inconsistencies, so we write our own adapter,
-  pin the version, and **cross-check a few scenarios against the Purdue web
-  calculator before wiring it into Airflow**.
+Collins et al. supplies physical quantities and motivates the hazard selection. **All thresholds and fractions below are our educational assumptions**, not coefficients claimed to come from that paper, GEM or NASA. They need team/scientific review before any use beyond the demo.
 
-### 2.2 Deaths layer — Rumpf vulnerability models
+| Threshold | Fatality fraction | Building loss fraction |
+|---|---:|---:|
+| Overpressure ≥20 kPa | 0.01 | 0.10 |
+| Overpressure ≥50 kPa | 0.10 | 0.50 |
+| Overpressure ≥100 kPa | 0.50 | 1.00 |
+| Overpressure ≥200 kPa | 0.95 | 1.00 |
+| Thermal ≥100 kJ/m² | 0.01 | 0.05 |
+| Thermal ≥300 kJ/m² | 0.10 | 0.20 |
+| Thermal ≥1000 kJ/m² | 0.50 | 0.70 |
 
-- Repo: `c-type/asteroid_impact_vulnerability` (published by Clemens Rumpf
-  himself, 2018-05-29, Python). Paper: *Population vulnerability models for
-  asteroid impact risk assessment*, Rumpf, Lewis & Atkinson 2017,
-  DOI 10.1111/maps.12861.
-- Structure: split the area around the impact into population cells; for each
-  cell `i` and each hazard `h` (wind, overpressure, thermal, shaking, ejecta,
-  cratering):
+Partition the disc at every pressure/thermal radius. Annulus `[r1,r2]` contains `N*(r2²-r1²)/R²` people. For each hazard use the strongest applicable band. Fatality fraction = `1-(1-f_pressure)*(1-f_thermal)`, an explicit independence approximation. Building loss fraction = `max(loss_pressure,loss_thermal)` to avoid destroying an asset twice.
 
-  ```
-  D_i = N_i * V_i        with        V_i = 1 - prod_h (1 - V_i,h)
-  D   = sum_i D_i
-  ```
+Sum annuli, round deaths to nearest integer and cap at `floor(N)`. Floor USD losses and cap at exposed asset value. Never derive economic loss from the number of deaths.
 
-  The product-of-survival form avoids double-counting a person killed by both
-  wind and heat. Note this independence assumption is itself a modeling
-  choice, not a proven fact.
-- **Stated limits we must respect**: the models were derived from tornado and
-  nuclear-blast data; the author used them for asteroids up to ~400 m diameter.
-  The published code does not include the tsunami effect from the paper.
-  Several of our Sentry asteroids exceed 400 m — we must decide how to label
-  those results (extrapolation warning).
-- **License check needed**: the repo shows no clear license. Before copying or
-  redistributing the code in our repo, verify or reimplement the published
-  formulas ourselves (they are all in the paper).
-- In the UI/report, label the number as *"estimated immediate fatalities under
-  the selected impact scenario"*, never as a NASA prediction.
+No tsunami, climate effects, evacuation, indirect mortality, time-of-day exposure or calibrated building-specific fragility is modelled. Direct replacement loss is narrower than EM-DAT economic damage; immediate fatalities also differ from EM-DAT total deaths.
 
-### 2.3 Economic layer — the hard part
+## Shared intensity classes
 
-**No valid formula of the form `damage_usd = deaths * constant`.** Building
-damage and human fatalities are two different consequences. A defensible
-direct-loss model is:
+Shaking: `<4`, `[4,5)`, …, `[8,9)`, `9+`. Stored labels are `4-5`, etc. Missing/nonfinite values are `Not applicable`; negative seismic magnitudes are valid and belong to `<4`.
 
-```
-L = sum_i sum_k  A_i,k * r_k(I_i)
-```
+Wind lower limits follow [NOAA/NHC Saffir–Simpson](https://www.nhc.noaa.gov/aboutsshws.php): **119,154,178,209,252 km/h**. Use continuous half-open intervals without fractional-speed gaps. Labels `119-154 km/h`, etc. mean lower inclusive, upper exclusive. Below 119 is below hurricane strength; missing/nonfinite/negative wind is `Not applicable`.
 
-where `A_i,k` is the replacement value of asset type `k` in cell `i` (from
-GEM: `BLDG_REPL_COST_USD`, `COST_STRUCTURAL_USD`, `COST_NONSTRUCTURAL_USD`,
-`COST_CONTENTS_USD`, ...), `I_i` is the physical intensity in that cell, and
-`r_k(I_i)` is the loss ratio for asset type `k` at that intensity. This is the
-same "loss ratio x asset cost" structure OpenQuake uses.
+This is a numerical comparison only: Saffir–Simpson describes sustained hurricane winds, while an impact blast is transient. Matching categories do not imply equivalent damage mechanisms.
 
-**No double counting**: a building already destroyed by wind cannot lose
-another 100% to thermal radiation. How effects combine on the same asset must
-be an explicit, documented rule (e.g. take the max ratio per asset, or a
-documented product form).
-
-Three implementation tiers:
-
-| Tier | Approach | Caveat |
-|---|---|---|
-| A — educational proxy (proposed MVP) | Build intensity bands per effect and assign documented or openly assumed loss ratios per band | This is OUR model, labeled as such (`damage_method = 'educational_loss_proxy_v1'`), not "a GEM asteroid loss model" |
-| B — per-hazard fragility | Real fragility/vulnerability curves for blast, wind, thermal, shaking | Needs a source per curve and an overlap rule; much more work |
-| C — full loss framework | pelicun / OpenQuake where applicable | Frameworks do not choose our models for us |
-
-**Rule**: if we cannot justify a loss ratio, the value stays `NULL` rather
-than inventing a scientific-looking number.
-
-GEM caveats: license is CC BY-NC-SA 4.0 (attribution, non-commercial,
-share-alike — check compatibility with how we publish the repo); the
-spatially-disaggregated data requires an access request; field coverage varies
-per country and must be checked file by file. Fallback if GEM is not
-obtainable in time: GeoNames population + a documented per-capita asset value
-proxy, explicitly labeled.
-
-## 3. Keeping simulated results comparable with EM-DAT
-
-For historical rows (EM-DAT):
-
-- `deaths` = `Total Deaths` (includes confirmed dead + missing presumed dead —
-  not identical to "immediate fatalities"; document this).
-- `damage_usd` = `Total Damage ('000 US$)` x 1000, or the inflation-adjusted
-  variant — but then record the price base year.
-- Empty EM-DAT cells are not confirmed zeros: keep `NULL`, never fill 0.
-
-Scopes differ: our simulation would measure **direct building replacement
-loss**; EM-DAT damage can cover a broader economic scope. Add provenance
-columns so the game never presents the two as the same measure:
-
-```text
-damage_scope       -- e.g. 'direct_building_replacement'
-currency_base_year
-damage_method      -- e.g. 'educational_loss_proxy_v1'
-```
-
-## 4. Sentry inputs
-
-Use mode O per asteroid:
-
-| Field | Meaning |
+| EM-DAT scale | Interpretation |
 |---|---|
-| `diameter` | km |
-| `mass` | kg (derived from diameter assuming density 2.6 g/cm3 — an estimate, document it) |
-| `v_imp` | velocity at atmospheric entry, km/s — **use this one** |
-| `ip` | impact probability (Earth, not any city) |
+| `Moment Magnitude`, `Richter` | seismic magnitude and shaking class |
+| `Kph` | maximum wind and wind class |
+| Anything else, including NULL | NULL measurements; `Not applicable` classes |
 
-Pitfalls:
+## Output and warehouse handoff
 
-- Do not use `v_inf` (hyperbolic excess velocity) as if it were `v_imp`.
-- Sentry provides **no impact coordinates**: the "asteroid x city" pairing is
-  our game scenario, not a NASA prediction. The chosen city is an assumption.
-- `impact_probability` must not be multiplied into our per-city death counts
-  and presented as expected deaths at that city. Our game metric is:
-  *"if asteroid a strikes city c, what are the estimated consequences?"*
-  — a conditional, scenario-level quantity. Risk-weighted indices would need
-  a spatial impact probability distribution we do not have.
+The DAG runs after **any** `stg_asteroid`, `stg_city` or `stg_disaster` publication. OR is intentional: unchanged staging tasks skip and do not republish. On first startup an early event may produce an empty intermediate build; later input publications rebuild it.
 
-## 5. Schema adjustments to discuss
+One transaction replaces `simulation.event_toll` (natural key `des,geonameid`) and `simulation.historical_intensity` (key `dis_no`). Toll rows include origin `Simulated`, impact date, deaths, damage, physical measurements/classes, exposed population, assumed disc radius, model version and build timestamp.
 
-Same asteroid x city can yield different results when assumptions change
-(entry angle, density, model version, exposure snapshot). Proposals:
+Lock staging tables in SHARE mode **before** taking the repeatable-read snapshot, because staging uses non-MVCC-safe `TRUNCATE`. Staging writers may wait during simulation. One active DAG run and an advisory transaction lock serialize builds. Empty successful inputs clear old outputs; errors roll back the entire output replacement. Success publishes `simulation_results`.
 
-1. New `dim_scenario` table:
+**#10 remains separate.** Its loader must resolve event/location/date surrogate keys, map `peak_wind_kmh` to `dim_event.max_wind_kmh`, load historical classes, and load `fact_event_toll` after dimensions. Origin is in `dim_event` in the current SQL. This branch leaves surrogate-key and SCD decisions to #10.
 
-```text
-dim_scenario
-------------
-scenario_key
-impact_latitude
-impact_longitude
-entry_angle_deg
-impactor_density_kgm3
-target_type
-physics_model_version
-fatality_model_version
-damage_model_version
-exposure_version
-assumptions_json
+`sql/simulation_q5.sql` demonstrates matching directly on natural-keyed outputs, excluding `Not applicable`. A DB fixture verifies a matching earthquake. The real EM-DAT demo and final star-schema Q5 still require #10 and a loaded export.
+
+## Reference cases
+
+From the repository root, PowerShell:
+
+```powershell
+$env:PYTHONPATH = 'docker/airflow/dags'
+.venv/Scripts/python -m simulation.reference --benchmark
 ```
 
-2. `fact_event_toll` gains `scenario_key` (NULL or a "not applicable" member
-   for historical rows).
-3. Move distance/location-dependent results (`max_wind_kmh`, `shaking_class`,
-   ...) out of `dim_event`: in a simulation they are outputs at a specific
-   location, not fixed asteroid attributes.
+Same synthetic city: 1,000,000 exposed people, radius 10.30065 km, replacement value $50,000/person; entry speed 20 km/s. Measured 2026-11-25:
 
-## 6. Proposed pipeline and checks
+| Diameter | Incoming Mt | Airburst | Magnitude | Wind at 1 km (km/h) | Deaths | Damage USD |
+|---|---:|---:|---:|---:|---:|---:|
+| 20 m | 0.520595 | 22.642 km | N/A | 17.539 | 0 | 0 |
+| 140 m | 178.564202 | ground | 5.82124 | 14,277.156 | 815,775 | 50,000,000,000 |
+| 1 km | 65,074.417617 | ground | 7.81695 | 162,782.294 | 975,000 | 50,000,000,000 |
 
-```text
-Sentry + EM-DAT + exposure
-        -> raw snapshots
-        -> staging + unit conversion + quality checks
-        -> scenario generation
-        -> physics -> fatalities -> economic loss
-        -> validated simulation results
-        -> fact_event_toll / reporting views
-        -> Streamlit game reads stored results (never computes live)
+These verify reproducibility, not casualty calibration. Zero toll for 20 m means it misses the selected bands, not that it is harmless. The near-field wind caveat above applies.
+
+### Independent energy check
+
+`tests/fixtures/sentry_reference.json` saves three NASA/JPL responses retrieved 2026-11-25, near those diameters. Tests use them offline. See the [Sentry API field definitions](https://ssd-api.jpl.nasa.gov/doc/sentry.html).
+
+| Designation | Diameter m | Entry km/s | Sentry Mt | Computed Mt | Ratio |
+|---|---:|---:|---:|---:|---:|
+| 2025 DB15 | 20.000 | 12.85 | 0.1968 | 0.2149 | 1.0920 |
+| 2005 NX55 | 140.364 | 27.19 | 334.7 | 332.6071 | 0.9937 |
+| 2010 ER12 | 1013.104 | 26.37 | 120,000 | 117,633.9187 | 0.9803 |
+
+All are within a factor of two. This verifies incoming energy and units; it does not independently validate atmospheric or near-field physics against Purdue.
+
+### Timing
+
+2200 distinct synthetic asteroid profiles ×100 city populations = **220,000 pairs**, **30.501 seconds** on this Windows/Python 3.12/NumPy 2 machine; cache 2200 misses and 217,800 hits. Target: **under 5 minutes for computation** here, an implementation target rather than a team-agreed SLA. It excludes PostgreSQL I/O/ingestion. Task timeout: 30 minutes. A full real-data DAG benchmark is still required before declaring #11 done.
+
+## Verification
+
+Tests cover every class boundary/scale, band areas/overlap, population caps including fractional occupants, invalid/zero exposure, probability semantics, airburst, horizon and saved Sentry energy. DB tests exercise both drivers, reruns, empty replacement, rollback and Q5 matching. DAG tests run in Airflow/Linux; Windows skips them without Airflow.
+
+Disposable database:
+
+```powershell
+docker compose -f tests/docker-compose.yml -p ot7-simulation-tests up -d --wait
+$env:WAREHOUSE_TEST_DSN = 'postgresql://test:test@127.0.0.1:55433/warehouse_test?connect_timeout=5'
+.venv/Scripts/python -m pytest
+docker compose -f tests/docker-compose.yml -p ot7-simulation-tests down
 ```
 
-Validation checks:
-
-- `0 <= deaths <= exposed_population`
-- `0 <= damage_usd <= exposed_asset_value` (for direct replacement loss)
-- NULL vs 0 never conflated
-- Unit conversions explicit: km/s vs m/s, Pa, USD, km vs m
-- Determinism: cache results per (input hash, model versions)
-- City totals: state clearly whether a figure is the city proper or the
-  affected region
-
-## 7. MVP proposal (to confirm)
-
-| Component | Choice |
-|---|---|
-| Scope | Fixed set of cities, land impacts; no tsunami, no global climate effects |
-| Physics | `ImpactEffect==1.0.0` behind our adapter, validated against Purdue on a few scenarios |
-| Deaths | Rumpf models (paper formulas; repo code pending license check) |
-| Exposure | GEM if access + license work for us; else GeoNames + documented proxy |
-| Damage USD | GEM asset value x tier-A loss ratios, labeled `educational_loss_proxy_v1` |
-| Unknowns | stay NULL |
-| Execution | Computed in the pipeline, game reads stored rows |
-
-## 8. Open questions for the team
-
-1. **Physics**: accept `ImpactEffect==1.0.0` after smoke tests, or reimplement
-   the subset of Purdue formulas we need (avoids a dependency of unknown
-   quality, costs time)?
-2. **Deaths license**: reimplement Rumpf formulas from the paper ourselves
-   (safe), or use the repo code (faster, license unclear)?
-3. **>400 m asteroids**: extrapolate with a warning label, or clamp/skip?
-4. **GEM access**: who requests the disaggregated data, and is CC BY-NC-SA
-   4.0 acceptable for this repo? Fallback = GeoNames proxy?
-5. **Loss ratios (tier A)**: which source values do we use for the bands, or
-   do we agree on openly-stated assumptions? What is the effect-combination
-   rule (max vs product)?
-6. **Scenario defaults**: entry angle 45 deg, density from Sentry (2.6
-   g/cm3) — good defaults, or do we vary them?
-7. **Schema**: do we accept `dim_scenario` + moving location-dependent
-   attributes out of `dim_event`, or keep the current star schema for the
-   MVP and version via assumptions in a side table?
-8. **Damage scope for the game label**: "estimated direct building damage" —
-   agreed wording?
-
-Once these are answered, this document is updated with the decisions and
-becomes the reference for the implementation in the Airflow pipeline.
+This tmpfs database uses port 55433, separate from the real warehouse. Never point tests at data to preserve: the existing fixture resets staging.
