@@ -23,6 +23,8 @@ TREE = {
         {"path": "Europe/France/summaries/Exposure_Summary_Adm0.csv", "type": "blob"},
         {"path": FRANCE_PATH, "type": "blob"},
         {"path": LEBANON_PATH, "type": "blob"},
+        # Aggregate of every country: downloading it would count each region twice (not mocked: a call fails)
+        {"path": "World/summaries/Exposure_Summary_Adm1.csv", "type": "blob"},
     ],
 }
 HEADER = "ID_0,NAME_0,ID_1,NAME_1,OCCUPANCY,BUILDINGS,OCCUPANTS_TOTAL\n"

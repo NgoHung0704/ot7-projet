@@ -14,6 +14,7 @@ API_URL = "https://api.github.com/repos/gem/global_exposure_model"
 RAW_URL = "https://raw.githubusercontent.com/gem/global_exposure_model"
 COLLECTION = "gem_exposure_adm1"
 ADM1_SUFFIX = "summaries/Exposure_Summary_Adm1.csv"
+WORLD_PREFIX = "World/"  # aggregate of every country: its regions are already in the country files
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,8 @@ def adm1_paths(session: requests.Session, sha: str) -> list[str]:
     if tree.get("truncated"):
         raise RuntimeError(f"gem/global_exposure_model@{sha}: file tree truncated by GitHub")
     paths = sorted(
-        entry["path"] for entry in tree["tree"] if entry["type"] == "blob" and entry["path"].endswith(ADM1_SUFFIX)
+        entry["path"] for entry in tree["tree"]
+        if entry["type"] == "blob" and entry["path"].endswith(ADM1_SUFFIX) and not entry["path"].startswith(WORLD_PREFIX)
     )
     if not paths:
         raise RuntimeError(f"no {ADM1_SUFFIX} in gem/global_exposure_model@{sha}: repository layout changed?")
