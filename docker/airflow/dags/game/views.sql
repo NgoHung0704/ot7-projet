@@ -25,7 +25,9 @@ SELECT toll.des,
 FROM simulation.event_toll AS toll
 JOIN staging.stg_asteroid AS asteroid ON asteroid.des = toll.des
 JOIN staging.stg_city AS city ON city.geonameid = toll.geonameid
-WHERE NOT EXISTS (SELECT 1 FROM staging.stg_asteroid_removed AS removed WHERE removed.des = toll.des);
+-- NOT IN rather than NOT EXISTS: the planner takes the anti-join to keep almost no row and picks nested loops,
+-- 30 s per draw on 356,000 scenarios. des is a primary key, so NOT IN never meets a NULL.
+WHERE toll.des NOT IN (SELECT des FROM staging.stg_asteroid_removed);
 
 -- Only sudden, local disasters with a known death toll: a decade-long famine is no match for an impact.
 DROP VIEW IF EXISTS game.historical_disaster;
