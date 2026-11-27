@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - ${GAME_APP_PORT:-8501}:8501
+    environment:
+      GAME_DB_HOST: database
+      GAME_DB_PORT: 5432
+      GAME_DB_NAME: ${GAME_DB_NAME}
+      GAME_READER_PASSWORD: ${GAME_READER_PASSWORD}
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - common-inner-network

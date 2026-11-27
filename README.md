@@ -20,12 +20,13 @@ cp .env.example .env
 cp docker/airflow/.env.example docker/airflow/.env
 cp docker/mongo/.env.example docker/mongo/.env
 cp docker/postgres/.env.example docker/postgres/.env
+cp docker/app/.env.example docker/app/.env
 ```
 
 The example values work as they are on a local machine.
 
 - On Linux, set `AIRFLOW_UID` in `docker/airflow/.env` to the output of `id -u`.
-- If you change the warehouse user, password or database in `docker/postgres/.env`, change `AIRFLOW_CONN_POSTGRES_WAREHOUSE` in `docker/airflow/.env` the same way.
+- If you change the warehouse user, password or database in `docker/postgres/.env`, change `AIRFLOW_CONN_POSTGRES_WAREHOUSE` in `docker/airflow/.env` the same way, and the database name `GAME_DB_NAME` in `docker/app/.env`.
 - The `.env` files are git-ignored: never commit them.
 
 ### 3. Add the EM-DAT export (manual)
@@ -68,7 +69,11 @@ All services should be `running`, and `healthy` when they have a health check.
 5. `simulation` rebuilds conditional asteroid × city tolls and historical intensity classes after staging changes. Trigger it manually after updating the simulation code.
 6. `game_views` runs after `simulation` and publishes the read-only views the game reads.
 
-### 6. Look at the data
+### 6. Play
+
+Open the game on [localhost:8501](http://localhost:8501) once `game_views` has run. After a change to `docker/app/`, rebuild it with `docker compose up -d --build app`.
+
+### 7. Look at the data
 
 | Data | Where | Login |
 |---|---|---|
@@ -83,7 +88,7 @@ The first time you open pgAdmin, register the warehouse:
    - maintenance database, username and password: `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` from `docker/postgres/.env`.
 3. The tables are under *Databases* → your database → *Schemas* → `staging` → *Tables*.
 
-### 7. Stop
+### 8. Stop
 
 ```bash
 docker compose down
@@ -113,6 +118,7 @@ flowchart LR
   S2 --> R[(PostgreSQL schema simulation)]
   R --> V[[game_views]]
   V --> GV[(PostgreSQL schema game)]
+  GV --> APP[Impact Duel game, Streamlit]
   R -.-> N[star schema loader: to come]
 ```
 
@@ -165,6 +171,17 @@ The `game_views` DAG runs after `simulation`. It publishes the views the game re
 | `historical_disaster` | sudden EM-DAT disaster (earthquake, storm, flood, volcanic activity, mass movement, explosion, industrial accident) with a known death toll: deaths, inflation-adjusted damage when known, intensity classes |
 
 The views read the `staging` and `simulation` tables live, so the game always sees the latest build. Run `game_views` again only after changing `docker/airflow/dags/game/views.sql`.
+
+## Game
+
+The `app` service runs **Impact Duel** (Streamlit, `docker/app/`). It logs in as `game_reader` and reads only the `game` views.
+
+- A game has 10 rounds. Each round puts an asteroid striking a city against a historical disaster. The player picks which caused more deaths and which caused more material damage, then reveals the figures.
+- One point per correct answer. When EM-DAT has no damage figure, the round asks only about deaths.
+- The draw skips ties and pairs where one side is over 1,000 times worse than the other, and never replays an asteroid or a disaster within a game.
+- The asteroid causes more deaths in half the rounds. 94% of Sentry scenarios kill no one, so without this rule "Disaster" would almost always be right. A harmless asteroid still appears in a quarter of the rounds.
+- Asteroid figures are rounded to two significant figures: they are estimates, not predictions.
+- The score lives in the browser session only. Rounds are not stored.
 
 ## Star schema
 
