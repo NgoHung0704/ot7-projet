@@ -22,8 +22,10 @@ def _rows(conn: psycopg.Connection, query: str, params: tuple = ()) -> list[dict
         return cur.fetchall()
 
 
-def shuffled_scenarios(conn: psycopg.Connection) -> list[dict]:
-    return _rows(conn, "SELECT * FROM game.asteroid_scenario ORDER BY random() LIMIT %s", (CANDIDATES,))
+def shuffled_scenarios(conn: psycopg.Connection, deadly: bool) -> list[dict]:
+    """Random scenarios that kill someone, or random harmless ones."""
+    return _rows(conn, "SELECT * FROM game.asteroid_scenario WHERE (deaths > 0) = %s ORDER BY random() LIMIT %s",
+                 (deadly, CANDIDATES))
 
 
 def shuffled_disasters(conn: psycopg.Connection) -> list[dict]:

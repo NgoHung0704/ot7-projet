@@ -179,6 +179,7 @@ The `app` service runs **Impact Duel** (Streamlit, `docker/app/`). It logs in as
 - A game has 10 rounds. Each round puts an asteroid striking a city against a historical disaster. The player picks which caused more deaths and which caused more material damage, then reveals the figures.
 - One point per correct answer. When EM-DAT has no damage figure, the round asks only about deaths.
 - The draw skips ties and pairs where one side is over 1,000 times worse than the other, and never replays an asteroid or a disaster within a game.
+- The asteroid causes more deaths in half the rounds. 94% of Sentry scenarios kill no one, so without this rule "Disaster" would almost always be right. A harmless asteroid still appears in a quarter of the rounds.
 - Asteroid figures are rounded to two significant figures: they are estimates, not predictions.
 - The score lives in the browser session only. Rounds are not stored.
 

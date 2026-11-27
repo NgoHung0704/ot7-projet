@@ -1,4 +1,4 @@
-from duel import ASTEROID, DISASTER, Duel, dollars, estimate, find_duel, is_fair, score
+from duel import ASTEROID, DISASTER, Duel, dollars, estimate, find_duel, is_fair, plan_round, score
 
 
 def scenario(des="a", deaths=1_000, damage=5_000_000):
@@ -45,12 +45,33 @@ def test_score_counts_each_question_asked():
 def test_find_duel_skips_unfair_and_already_played_pairs():
     scenarios = [scenario("played"), scenario("huge", deaths=10**9), scenario("ok")]
     disasters = [disaster("played-too"), disaster("fine")]
-    duel = find_duel(scenarios, disasters, played_asteroids={"played"}, played_disasters={"played-too"})
+    duel = find_duel(scenarios, disasters, played_asteroids={"played"}, played_disasters={"played-too"},
+                     deaths_winner=DISASTER)
     assert (duel.asteroid["des"], duel.disaster["dis_no"]) == ("ok", "fine")
 
 
+def test_find_duel_keeps_only_pairs_with_the_planned_deaths_winner():
+    scenarios = [scenario("weak", deaths=100), scenario("strong", deaths=9_000)]
+    disasters = [disaster("small", deaths=500)]
+    assert find_duel(scenarios, disasters, set(), set(), deaths_winner=ASTEROID).asteroid["des"] == "strong"
+    assert find_duel(scenarios, disasters, set(), set(), deaths_winner=DISASTER).asteroid["des"] == "weak"
+
+
 def test_find_duel_gives_up_without_a_fair_pair():
-    assert find_duel([scenario(deaths=10**9)], [disaster()], set(), set()) is None
+    assert find_duel([scenario(deaths=10**9)], [disaster()], set(), set(), deaths_winner=ASTEROID) is None
+
+
+class FixedRandom:
+    def __init__(self, value):
+        self.value = value
+
+    def random(self):
+        return self.value
+
+
+def test_plan_round_splits_the_deaths_answer_evenly():
+    plans = [plan_round(FixedRandom(value)) for value in (0.1, 0.3, 0.6, 0.9)]
+    assert plans == [(DISASTER, False), (DISASTER, True), (ASTEROID, True), (ASTEROID, True)]
 
 
 def test_estimates_keep_two_significant_figures():

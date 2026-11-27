@@ -3,12 +3,14 @@
 The score lives only in the browser session: rounds are not written back to the warehouse.
 """
 
+import random
+
 import pandas as pd
 import psycopg
 import streamlit as st
 
 import game_data
-from duel import ASTEROID, DISASTER, ROUNDS_PER_GAME, dollars, estimate, find_duel, people, score, worse
+from duel import ASTEROID, DISASTER, ROUNDS_PER_GAME, dollars, estimate, find_duel, people, plan_round, score, worse
 
 DRAW_ATTEMPTS = 5
 PIPELINE_HINT = "Run the Airflow DAGs `ingest_raw`, `staging`, `simulation` and `game_views` first."
@@ -23,8 +25,9 @@ def new_game() -> None:
 
 def draw_duel(conn):
     for _ in range(DRAW_ATTEMPTS):
-        duel = find_duel(game_data.shuffled_scenarios(conn), game_data.shuffled_disasters(conn),
-                         st.session_state.played_asteroids, st.session_state.played_disasters)
+        deaths_winner, deadly = plan_round(random)
+        duel = find_duel(game_data.shuffled_scenarios(conn, deadly), game_data.shuffled_disasters(conn),
+                         st.session_state.played_asteroids, st.session_state.played_disasters, deaths_winner)
         if duel:
             st.session_state.played_asteroids.add(duel.asteroid["des"])
             st.session_state.played_disasters.add(duel.disaster["dis_no"])

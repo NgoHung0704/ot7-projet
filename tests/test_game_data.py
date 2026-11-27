@@ -23,7 +23,8 @@ def reader(warehouse, monkeypatch):  # noqa: F811
 
 
 def test_candidates_come_from_the_game_views(reader):
-    assert [row["des"] for row in game_data.shuffled_scenarios(reader)] == ["kept"]
+    assert [row["des"] for row in game_data.shuffled_scenarios(reader, deadly=True)] == ["kept"]
+    assert game_data.shuffled_scenarios(reader, deadly=False) == []
     assert sorted(row["dis_no"] for row in game_data.shuffled_disasters(reader)) == ["blast", "quake"]
 
 

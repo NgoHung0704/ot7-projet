@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 ROUNDS_PER_GAME = 10
 MAX_RATIO = 1000
+# 94% of Sentry scenarios kill no one: drawn freely, "Disaster" would be right almost every round.
+HARMLESS_SHARE = 0.25
 ASTEROID = "Asteroid"
 DISASTER = "Disaster"
 
@@ -31,9 +33,21 @@ def is_fair(duel: Duel) -> bool:
     return not duel.asks_damage or _is_guessable(duel.asteroid["damage_usd"], duel.disaster["damage_usd"])
 
 
-def find_duel(scenarios: list[dict], disasters: list[dict],
-              played_asteroids: set[str], played_disasters: set[str]) -> Duel | None:
-    """First fair pair of the shuffled candidates, never replaying an asteroid or a disaster of the game."""
+def plan_round(rng) -> tuple[str, bool]:
+    """Side that must cause more deaths, and whether the asteroid must kill someone.
+
+    Each side wins half the rounds; harmless asteroids still appear in a quarter of them, against a deadlier disaster.
+    """
+    draw = rng.random()
+    if draw < HARMLESS_SHARE:
+        return DISASTER, False
+    return (DISASTER if draw < 0.5 else ASTEROID), True
+
+
+def find_duel(scenarios: list[dict], disasters: list[dict], played_asteroids: set[str],
+              played_disasters: set[str], deaths_winner: str) -> Duel | None:
+    """First fair pair of the shuffled candidates where `deaths_winner` caused more deaths,
+    never replaying an asteroid or a disaster of the game."""
     for scenario in scenarios:
         if scenario["des"] in played_asteroids:
             continue
@@ -41,7 +55,7 @@ def find_duel(scenarios: list[dict], disasters: list[dict],
             if disaster["dis_no"] in played_disasters:
                 continue
             duel = Duel(scenario, disaster)
-            if is_fair(duel):
+            if worse(scenario["deaths"], disaster["deaths"]) == deaths_winner and is_fair(duel):
                 return duel
     return None
 
