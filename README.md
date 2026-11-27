@@ -60,12 +60,13 @@ All services should be `running`, and `healthy` when they have a health check.
 ### 5. Run the pipeline
 
 1. Open Airflow on [localhost:8080](http://localhost:8080). The user and password are `_AIRFLOW_WWW_USER_USERNAME` and `_AIRFLOW_WWW_USER_PASSWORD` in `docker/airflow/.env`.
-2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`** and **`simulation`**.
+2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`**, **`simulation`** and **`game_views`**.
 3. Trigger `ingest_raw` with the ▶ button.
    - The first run on an empty database takes about 30 minutes: it downloads the details of ~2,200 asteroids one at a time, as NASA's API requires.
    - The next runs take less than a minute. `ingest_raw` then runs by itself once a month.
 4. `staging` starts by itself each time `ingest_raw` brings new data.
 5. `simulation` rebuilds conditional asteroid × city tolls and historical intensity classes after staging changes. Trigger it manually after updating the simulation code.
+6. `game_views` runs after `simulation` and publishes the read-only views the game reads.
 
 ### 6. Look at the data
 
@@ -110,7 +111,9 @@ flowchart LR
   T --> P[(PostgreSQL warehouse, schema staging)]
   P --> S2[[simulation]]
   S2 --> R[(PostgreSQL schema simulation)]
-  R -.-> N[star schema loader, game: to come]
+  R --> V[[game_views]]
+  V --> GV[(PostgreSQL schema game)]
+  R -.-> N[star schema loader: to come]
 ```
 
 ## Airflow
@@ -152,12 +155,25 @@ $env:PYTHONPATH = 'docker/airflow/dags'
 .venv/Scripts/python -m simulation.reference --benchmark
 ```
 
+## Game views
+
+The `game_views` DAG runs after `simulation`. It publishes the views the game reads, in schema `game`, and the read-only role `game_reader` that the game logs in with. Its password is `GAME_READER_PASSWORD` in the root `.env`.
+
+| View | One row per |
+|---|---|
+| `asteroid_scenario` | asteroid still on the Sentry list × impact city: diameter, entry speed, city, population, coordinates, deaths, damage, intensity classes |
+| `historical_disaster` | sudden EM-DAT disaster (earthquake, storm, flood, volcanic activity, mass movement, explosion, industrial accident) with a known death toll: deaths, inflation-adjusted damage when known, intensity classes |
+
+The views read the `staging` and `simulation` tables live, so the game always sees the latest build. Run `game_views` again only after changing `docker/airflow/dags/game/views.sql`.
+
+## Star schema
+
 The final dimension/fact loader remains issue #10. [The Q5 example](sql/simulation_q5.sql) compares shared classes directly on simulation outputs while that loader is pending.
 
 ## Postgres & mongo
 
 - **MongoDB holds the raw data.** The APIs return documents whose format can change. A schema-less store keeps them exactly as received, so the ingestion stays simple and nothing is lost.
-- **PostgreSQL holds the warehouse.** It holds clean, typed tables: the `staging` schema now, and the star schema the game and the notebooks query.
+- **PostgreSQL holds the warehouse.** It holds clean, typed tables: the `staging` and `simulation` schemas, the `game` views the game reads, and later the star schema the notebooks query.
 
 ## Tests
 
