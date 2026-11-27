@@ -12,6 +12,10 @@ include:
     env_file:
       - .env
       - docker/postgres/.env
+  - path: docker/app/compose.yml
+    env_file:
+      - .env
+      - docker/app/.env
 
 networks:
   airflow:

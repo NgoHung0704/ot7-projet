@@ -1,5 +1,10 @@
-# Placeholder: replace with the real image content.
-# The build context is the repo root, e.g. COPY sql/ /sql/
-FROM alpine:3.22
+# Image of the Impact Duel game (Streamlit). The build context is docker/app.
+FROM python:3.12-slim
 
-CMD ["echo", "placeholder image, see docker/app/Dockerfile"]
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app.py duel.py game_data.py ./
+
+EXPOSE 8501
+CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.gatherUsageStats=false"]
