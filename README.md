@@ -61,7 +61,7 @@ All services should be `running`, and `healthy` when they have a health check.
 ### 5. Run the pipeline
 
 1. Open Airflow on [localhost:8080](http://localhost:8080). The user and password are `_AIRFLOW_WWW_USER_USERNAME` and `_AIRFLOW_WWW_USER_PASSWORD` in `docker/airflow/.env`.
-2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`**, **`simulation`**, **`game_views`** and **`load_warehouse`**.
+2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`**, **`simulation`**, **`game_views`**, **`load_warehouse`**, **`generate_rounds`** and **`load_rounds`**.
 3. Trigger `ingest_raw` with the ▶ button.
    - The first run on an empty database takes about 30 minutes: it downloads the details of ~2,200 asteroids one at a time, as NASA's API requires.
    - The next runs take less than a minute. `ingest_raw` then runs by itself once a month.
@@ -69,6 +69,7 @@ All services should be `running`, and `healthy` when they have a health check.
 5. `simulation` rebuilds conditional asteroid × city tolls and historical intensity classes after staging changes. Trigger it manually after updating the simulation code.
 6. `game_views` runs after `simulation` and publishes the read-only views the game reads.
 7. `load_warehouse` also runs after `simulation` and loads the star schema of the report.
+8. Once `game_views` and `load_warehouse` have run, trigger `generate_rounds` with the ▶ button: it writes the synthetic game rounds into MongoDB, then `load_rounds` loads them into the star schema. See [Game rounds](#game-rounds).
 
 ### 6. Play
 
@@ -129,6 +130,10 @@ flowchart LR
   GV --> APP[Impact Duel game, Streamlit]
   R --> W[[load_warehouse]]
   W --> STAR[(PostgreSQL star schema)]
+  GV --> GR[[generate_rounds, manual]]
+  GR --> M
+  M --> LR[[load_rounds]]
+  LR --> STAR
 ```
 
 ## Airflow
@@ -191,6 +196,19 @@ The `app` service runs **Impact Duel** (Streamlit, `docker/app/`). It logs in as
 - The asteroid causes more deaths in half the rounds. 94% of Sentry scenarios kill no one, so without this rule "Disaster" would almost always be right. A harmless asteroid still appears in a quarter of the rounds.
 - Asteroid figures are rounded to two significant figures: they are estimates, not predictions.
 - The score lives in the browser session only. Rounds are not stored.
+
+## Game rounds
+
+The game stores no round, so the report's player questions (Q1, Q2, Q7, Q8) run on a synthetic sample, as the report's Datasets section says: 200,000 rounds played by 2,000 players from May to October 2026.
+
+- **`generate_rounds`** (triggered by hand, parameter `seed`, default 2026) draws each round like the game: same events (the `game` views), same fairness and balance rules. It writes them into MongoDB, collection `raw.game_rounds`, with the fields the game would write. The same seed always gives the same rounds, and a new run replaces the previous sample.
+- **Players.** Each has a country (one of the cities' countries) and a signup date. A player is a `beginner`, becomes `intermediate` after 30 rounds and `expert` after 120, counted at the start of each day, so `dim_player` has one version per level.
+- **Answers.** For deaths and for damage separately, the player picks the asteroid with probability `logistic(1.5 · log10((asteroid + 1) / (disaster + 1)) + bias)`. The bias towards the asteroid is 2.0 for a beginner, 1.0 for an intermediate player and 0.3 for an expert: people overestimate rare, spectacular hazards (Lichtenstein et al., 1978; Slovic, 1987), less so with experience. On the real data, deaths accuracy rises from 68% for beginners to 84% for experts, and beginners pick the asteroid in 64% of the rounds where the disaster was worse.
+- **`load_rounds`** runs after each new sample. It stages the rounds in `staging.stg_round`, applies the report's quality checks, then fills `dim_player` and `fact_round`:
+  - referential: the asteroid, its city and the disaster must be current events of the star schema, with known deaths;
+  - consistency: `correct_deaths` and `correct_damage` must match `fact_event_toll`, and damage must be asked exactly when EM-DAT has a damage figure.
+
+  A round that fails a check goes to `staging.quarantine` (source `game_rounds`), not to `fact_round`. Loading the same rounds twice changes nothing.
 
 ## Star schema
 

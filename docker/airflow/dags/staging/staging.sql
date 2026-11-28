@@ -65,6 +65,24 @@ CREATE TABLE IF NOT EXISTS staging.stg_city (
     repl_cost_per_occupant_usd  DOUBLE PRECISION
 );
 
+-- Game rounds as the game writes them (raw.game_rounds), checked by load_rounds before fact_round.
+CREATE TABLE IF NOT EXISTS staging.stg_round (
+    round_id               BIGINT PRIMARY KEY,
+    player_id              TEXT NOT NULL,
+    player_country         TEXT,
+    player_level           TEXT NOT NULL,
+    player_signup_date     DATE NOT NULL,
+    played_at              TIMESTAMP NOT NULL,  -- UTC
+    asteroid_des           TEXT NOT NULL,
+    geonameid              BIGINT NOT NULL,
+    dis_no                 TEXT NOT NULL,
+    chose_asteroid_deaths  BOOLEAN NOT NULL,
+    correct_deaths         BOOLEAN NOT NULL,
+    chose_asteroid_damage  BOOLEAN,  -- NULL when the round did not ask about damage
+    correct_damage         BOOLEAN,
+    response_time_s        DOUBLE PRECISION NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS staging.quarantine (
     id           BIGSERIAL PRIMARY KEY,
     source       TEXT NOT NULL,
