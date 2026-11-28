@@ -61,13 +61,14 @@ All services should be `running`, and `healthy` when they have a health check.
 ### 5. Run the pipeline
 
 1. Open Airflow on [localhost:8080](http://localhost:8080). The user and password are `_AIRFLOW_WWW_USER_USERNAME` and `_AIRFLOW_WWW_USER_PASSWORD` in `docker/airflow/.env`.
-2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`**, **`simulation`** and **`game_views`**.
+2. New DAGs start paused: switch on **`ingest_raw`**, **`staging`**, **`simulation`**, **`game_views`** and **`load_warehouse`**.
 3. Trigger `ingest_raw` with the ▶ button.
    - The first run on an empty database takes about 30 minutes: it downloads the details of ~2,200 asteroids one at a time, as NASA's API requires.
    - The next runs take less than a minute. `ingest_raw` then runs by itself once a month.
 4. `staging` starts by itself each time `ingest_raw` brings new data.
 5. `simulation` rebuilds conditional asteroid × city tolls and historical intensity classes after staging changes. Trigger it manually after updating the simulation code.
 6. `game_views` runs after `simulation` and publishes the read-only views the game reads.
+7. `load_warehouse` also runs after `simulation` and loads the star schema of the report.
 
 ### 6. Play
 
@@ -78,7 +79,7 @@ Open the game on [localhost:8501](http://localhost:8501) once `game_views` has r
 | Data | Where | Login |
 |---|---|---|
 | Raw data, as downloaded (database `raw`) | mongo-express on [localhost:8081](http://localhost:8081) | `MONGO_EXPRESS_USERNAME` / `MONGO_EXPRESS_PASSWORD` in `docker/mongo/.env` |
-| Clean tables (schema `staging`) | pgAdmin on [localhost:5050](http://localhost:5050) | `PGADMIN_DEFAULT_EMAIL` / `PGADMIN_DEFAULT_PASSWORD` in `docker/airflow/.env` |
+| Clean tables (schema `staging`), star schema (schema `public`) | pgAdmin on [localhost:5050](http://localhost:5050) | `PGADMIN_DEFAULT_EMAIL` / `PGADMIN_DEFAULT_PASSWORD` in `docker/airflow/.env` |
 
 The first time you open pgAdmin, register the warehouse:
 
@@ -86,7 +87,14 @@ The first time you open pgAdmin, register the warehouse:
 2. In the *Connection* tab:
    - host `database`, port `5432`;
    - maintenance database, username and password: `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` from `docker/postgres/.env`.
-3. The tables are under *Databases* → your database → *Schemas* → `staging` → *Tables*.
+3. The tables are under *Databases* → your database → *Schemas* → `staging` (or `public` for the star schema) → *Tables*.
+
+To run the report's demo queries Q1–Q8 ([`sql/queries.sql`](sql/queries.sql)) on the star schema:
+
+```bash
+docker compose cp sql/queries.sql database:/tmp/queries.sql
+docker compose exec database sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v asteroid_des="'''101955'''" -f /tmp/queries.sql'
+```
 
 ### 8. Stop
 
@@ -119,7 +127,8 @@ flowchart LR
   R --> V[[game_views]]
   V --> GV[(PostgreSQL schema game)]
   GV --> APP[Impact Duel game, Streamlit]
-  R -.-> N[star schema loader: to come]
+  R --> W[[load_warehouse]]
+  W --> STAR[(PostgreSQL star schema)]
 ```
 
 ## Airflow
@@ -185,12 +194,26 @@ The `app` service runs **Impact Duel** (Streamlit, `docker/app/`). It logs in as
 
 ## Star schema
 
-The final dimension/fact loader remains issue #10. [The Q5 example](sql/simulation_q5.sql) compares shared classes directly on simulation outputs while that loader is pending.
+[`sql/schema.sql`](sql/schema.sql) is the star schema of the report, in schema `public`: `fact_event_toll` (one event at one place) and `fact_round` (one round played), on `dim_event`, `dim_location`, `dim_date` and `dim_player`. The `database` service runs it at its first start, and the `load_warehouse` DAG runs it before each load, so every statement can run again.
+
+`load_warehouse` loads it from `staging` and `simulation` after each simulation rebuild, with upserts on the natural keys: loading the same data twice changes nothing.
+
+| Table | Natural key | History |
+|---|---|---|
+| `dim_event` | EM-DAT `DisNo.` or Sentry `des` | Type 2 on an asteroid's diameter, mass, entry speed and the intensity computed from them: its existing scenarios keep the old version. Type 1 on the rest. A removed asteroid's version is closed. |
+| `dim_location` | GeoNames id of a city, or ISO 3166 alpha-3 code of the country of a historical disaster (`city` = `Whole country`) | Type 1 |
+| `dim_date` | date | static; `decade` is computed from `year` |
+| `dim_player` | game account id | Type 2 on `level`, Type 1 on `country` |
+| `fact_event_toll` | event version, location | deaths and damage replaced at each load |
+
+A historical disaster without a name in EM-DAT is named after its type and country, e.g. `Flood in Pakistan`. Damage is EM-DAT's adjusted damage.
+
+Databases created before the schema was executable hold the empty tables of its pseudocode version: `load_warehouse` drops them first, and stops if they hold rows.
 
 ## Postgres & mongo
 
 - **MongoDB holds the raw data.** The APIs return documents whose format can change. A schema-less store keeps them exactly as received, so the ingestion stays simple and nothing is lost.
-- **PostgreSQL holds the warehouse.** It holds clean, typed tables: the `staging` and `simulation` schemas, the `game` views the game reads, and later the star schema the notebooks query.
+- **PostgreSQL holds the warehouse.** It holds clean, typed tables: the `staging` and `simulation` schemas, the `game` views the game reads, and the star schema of the report, in schema `public`.
 
 ## Tests
 
@@ -200,4 +223,4 @@ python -m venv .venv
 .venv/Scripts/python -m pytest
 ```
 
-The tests that write to PostgreSQL run only when `WAREHOUSE_TEST_DSN` points to a database, for example the stack's warehouse: `postgresql://username:password@localhost:5433/warehouse`. They reset the `staging` schema, so do not point them at data you want to keep. `tests/test_dag.py` runs only where Airflow is installed, for example inside the Airflow image.
+The tests that write to PostgreSQL run only when `WAREHOUSE_TEST_DSN` points to a database, for example the stack's warehouse: `postgresql://username:password@localhost:5433/warehouse`. They reset the `staging` schema and the star schema, so do not point them at data you want to keep. On Windows, write `127.0.0.1` rather than `localhost`: each connection would first try IPv6 and wait. `tests/test_dag.py` runs only where Airflow is installed, for example inside the Airflow image.

@@ -68,3 +68,12 @@ def test_simulation_accepts_each_source_without_another_publication(dagbag):
     condition = dagbag.dags["simulation"].timetable.asset_condition
     assert type(condition).__name__ in {"AssetAny", "SerializedAssetAny"}
     assert {asset.name for asset in condition.objects} == {"stg_asteroid", "stg_city", "stg_disaster"}
+
+
+def test_load_warehouse_dag_shape(dagbag):
+    dag = dagbag.dags["load_warehouse"]
+    assert {task.task_id for task in dag.tasks} == {"load_star_schema"}
+    assert dag.catchup is False
+    assert dag.max_active_runs == 1
+    assert dag.timetable.asset_condition.name == "simulation_results"
+    assert [asset.name for asset in dag.tasks[0].outlets] == ["star_schema"]
