@@ -1,6 +1,7 @@
 -- The report's quality checks on game rounds. Referential: the round points to a current asteroid scenario
--- and a historical disaster with known deaths. Consistency: its correct_* flags match fact_event_toll, and it
--- asked about damage exactly when EM-DAT has a damage figure. check_name stays NULL for a valid round.
+-- and a historical disaster with known deaths. Consistency: its correct_* flags match fact_event_toll, it
+-- asked about damage exactly when EM-DAT has a damage figure, and it was played after the player signed up (the
+-- first dim_player version starts at signup). check_name stays NULL for a valid round.
 CREATE TEMPORARY TABLE checked_round ON COMMIT DROP AS
 SELECT staged.*,
        asteroid.event_key AS asteroid_event_key,
@@ -10,6 +11,8 @@ SELECT staged.*,
            WHEN asteroid_toll.deaths IS NULL OR disaster_toll.deaths IS NULL THEN 'referential'
            WHEN staged.correct_deaths <> (staged.chose_asteroid_deaths = (asteroid_toll.deaths > disaster_toll.deaths))
              OR (staged.correct_damage IS NULL) <> (disaster_toll.damage_usd IS NULL)
+             OR (staged.chose_asteroid_damage IS NULL) <> (staged.correct_damage IS NULL)
+             OR staged.played_at::DATE < staged.player_signup_date
              OR staged.correct_damage
                 <> (staged.chose_asteroid_damage = (asteroid_toll.damage_usd > disaster_toll.damage_usd))
                THEN 'consistency'

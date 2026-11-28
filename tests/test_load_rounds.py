@@ -88,3 +88,16 @@ def test_round_whose_answers_disagree_with_the_tolls_is_quarantined(star):
              game_round(8, datetime(2026, 5, 3), chose_asteroid_damage=None, correct_damage=None)]
     assert load_rounds(star, [*ROUNDS, *wrong], SCHEMA, "run")["quarantined"] == 2
     assert quarantined(star) == [("7", "consistency"), ("8", "consistency")]
+
+
+def test_new_sample_replaces_the_rounds_of_the_previous_one(star):
+    load_rounds(star, ROUNDS, SCHEMA, "run")
+    load_rounds(star, [ROUNDS[0], game_round(3, datetime(2026, 6, 10), asteroid_des="nope")], SCHEMA, "run")
+    assert [row[0] for row in loaded_rounds(star)] == [1]
+
+
+def test_round_played_before_signup_or_with_half_a_damage_answer_is_quarantined(star):
+    odd = [game_round(9, datetime(2026, 4, 30)),
+           game_round(10, datetime(2026, 5, 3), chose_asteroid_damage=None)]
+    assert load_rounds(star, [*ROUNDS, *odd], SCHEMA, "run")["quarantined"] == 2
+    assert quarantined(star) == [("10", "consistency"), ("9", "consistency")]

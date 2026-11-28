@@ -1,6 +1,10 @@
 -- Valid rounds into fact_round, each with the player version of the day it was played.
 -- Runs after rounds_checks.sql and the dim_player merge of rounds.py.
 
+-- raw.game_rounds holds a whole sample, and a new sample replaces the previous one: rounds it no longer has,
+-- or that now fail a check, must leave the answers the questions count.
+DELETE FROM fact_round WHERE round_id NOT IN (SELECT round_id FROM checked_round WHERE check_name IS NULL);
+
 -- Type 1: a player's country and signup date are corrections, taken from their latest round.
 UPDATE dim_player AS player
 SET country = latest.player_country, signup_date = latest.player_signup_date

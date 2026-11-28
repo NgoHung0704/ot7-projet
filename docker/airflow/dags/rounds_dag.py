@@ -12,7 +12,7 @@ from pathlib import Path
 
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import Asset, dag, get_current_context, task
+from airflow.sdk import Asset, Param, dag, get_current_context, task
 
 from game.rounds import generate_rounds, read_candidates
 from ingestion.store import RawStore
@@ -50,7 +50,8 @@ def warehouse():
     start_date=datetime(2026, 11, 1, tzinfo=timezone.utc),
     catchup=False,
     max_active_runs=1,
-    params={"seed": 2026},
+    # Typed, so that a seed typed in the trigger form gives the same rounds as the same number in code.
+    params={"seed": Param(2026, type="integer")},
     tags=["game"],
     doc_md=__doc__,
 )

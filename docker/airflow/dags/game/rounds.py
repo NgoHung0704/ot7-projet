@@ -133,6 +133,8 @@ def _answer(rng: random.Random, level: str, asteroid_value: int, disaster_value:
 
 
 def generate_rounds(candidates: Candidates, seed: int, rounds: int, players: int) -> list[dict]:
+    if rounds < players:
+        raise ValueError(f"{rounds} rounds for {players} players: at least one round per player")
     rng = random.Random(seed)
     pairs = _Pairs(candidates)
     documents = []

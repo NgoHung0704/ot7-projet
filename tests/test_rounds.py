@@ -93,3 +93,8 @@ def test_rerun_with_the_same_seed_replaces_the_stored_sample():
     stored = [{k: v for k, v in doc.items() if k not in ("_id", "_meta")} for doc in store.read_latest("game_rounds")]
     assert store.db["game_rounds"].count_documents({}) == 3_000
     assert sorted(stored, key=lambda doc: doc["round_id"]) == generate()
+
+
+def test_fewer_rounds_than_players_is_refused():
+    with pytest.raises(ValueError, match="at least one round per player"):
+        generate(rounds=10, players=40)
