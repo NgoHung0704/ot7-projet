@@ -35,7 +35,8 @@ def test_ensure_schema_is_idempotent(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'staging'")
         tables = {row[0] for row in cur.fetchall()}
-    assert tables == {"stg_asteroid", "stg_asteroid_removed", "stg_disaster", "stg_city", "quarantine", "build_log"}
+    assert tables == {"stg_asteroid", "stg_asteroid_removed", "stg_disaster", "stg_city", "stg_round", "quarantine",
+                      "build_log"}
 
 
 def test_replace_table_replaces_rows(conn):

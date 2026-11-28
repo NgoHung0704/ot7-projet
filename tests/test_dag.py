@@ -77,3 +77,15 @@ def test_load_warehouse_dag_shape(dagbag):
     assert dag.max_active_runs == 1
     assert dag.timetable.asset_condition.name == "simulation_results"
     assert [asset.name for asset in dag.tasks[0].outlets] == ["star_schema"]
+
+
+def test_rounds_dags_shape(dagbag):
+    generate = dagbag.dags["generate_rounds"]
+    assert [task.task_id for task in generate.tasks] == ["generate"]
+    assert type(generate.timetable).__name__ == "NullTimetable"
+    assert generate.params["seed"] == 2026
+    assert [asset.name for asset in generate.tasks[0].outlets] == ["raw_game_rounds"]
+    load = dagbag.dags["load_rounds"]
+    assert load.timetable.asset_condition.name == "raw_game_rounds"
+    assert load.max_active_runs == 1
+    assert [asset.name for asset in load.tasks[0].outlets] == ["fact_round"]
