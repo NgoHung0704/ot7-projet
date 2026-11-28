@@ -178,3 +178,35 @@ def test_pseudocode_tables_holding_rows_are_kept(warehouse):
     with pytest.raises(Exception, match="pseudocode"):
         load(warehouse, SCHEMA)
     assert rows(warehouse, "SELECT date_key FROM dim_date") == [(20300101,)]
+
+
+def test_scenario_the_simulation_dropped_leaves_the_star_schema(warehouse):
+    load(warehouse, SCHEMA)
+    with transaction(warehouse):
+        with warehouse.cursor() as cur:
+            cur.execute("DELETE FROM simulation.event_toll WHERE des = 'a' AND geonameid = 2")
+    load(warehouse, SCHEMA)
+    assert rows(warehouse, """SELECT l.city FROM fact_event_toll f JOIN dim_event e USING (event_key)
+                              JOIN dim_location l USING (location_key) WHERE e.event_id = 'a'""") == [("Paris",)]
+
+
+def test_disaster_without_country_or_type_is_named_but_has_no_place(warehouse):
+    with transaction(warehouse):
+        with warehouse.cursor() as cur:
+            cur.execute("INSERT INTO staging.stg_disaster (dis_no, start_date, date_precision, deaths) "
+                        "VALUES ('1950-0001-XXX', '1950-01-01', 'year', 12)")
+    load(warehouse, SCHEMA)
+    assert rows(warehouse, "SELECT event_name, disaster_type FROM dim_event WHERE event_id = '1950-0001-XXX'") == [
+        ("Unknown type in an unknown country", "Unknown type")]
+    assert rows(warehouse, "SELECT count(*) FROM fact_event_toll")[0][0] == 6
+
+
+def test_pseudocode_upgrade_refuses_any_table_holding_rows(warehouse):
+    drop_star(warehouse)
+    run_pseudocode_schema(warehouse)
+    with transaction(warehouse):
+        with warehouse.cursor() as cur:
+            cur.execute("CREATE TABLE fact_round (round_id BIGINT)")
+            cur.execute("INSERT INTO fact_round VALUES (1)")
+    with pytest.raises(Exception, match="pseudocode"):
+        load(warehouse, SCHEMA)

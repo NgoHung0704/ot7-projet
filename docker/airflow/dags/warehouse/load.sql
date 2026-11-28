@@ -15,17 +15,19 @@ FROM staging.stg_city
 UNION ALL
 -- One row per code even if EM-DAT spelled the country two ways: an upsert cannot touch a row twice.
 SELECT * FROM (SELECT DISTINCT ON (iso3) iso3, 'Whole country', country, NULL::FLOAT, NULL::FLOAT
-               FROM staging.stg_disaster ORDER BY iso3, country) AS countries
+               FROM staging.stg_disaster WHERE iso3 IS NOT NULL ORDER BY iso3, country) AS countries
 ON CONFLICT (location_id) DO UPDATE
 SET city = EXCLUDED.city, country = EXCLUDED.country,
     latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude;
 
--- Historical disasters: Type 1, EM-DAT corrections replace the old values.
+-- Historical disasters: Type 1, EM-DAT corrections replace the old values. Staging keeps a record without
+-- type or country, so name it anyway; without a country code it gets no place, hence no fact.
 INSERT INTO dim_event (event_id, event_name, origin, disaster_type, magnitude, max_wind_kmh,
                        shaking_class, wind_class, valid_from)
 SELECT disaster.dis_no,
-       COALESCE(disaster.event_name, disaster.disaster_type || ' in ' || disaster.country),
-       'Historical', disaster.disaster_type, intensity.magnitude, intensity.max_wind_kmh,
+       COALESCE(disaster.event_name, COALESCE(disaster.disaster_type, 'Unknown type') || ' in '
+                                     || COALESCE(disaster.country, 'an unknown country')),
+       'Historical', COALESCE(disaster.disaster_type, 'Unknown type'), intensity.magnitude, intensity.max_wind_kmh,
        COALESCE(intensity.shaking_class, 'Not applicable'), COALESCE(intensity.wind_class, 'Not applicable'),
        current_date
 FROM staging.stg_disaster AS disaster
@@ -92,3 +94,11 @@ JOIN dim_event AS event ON event.event_id = toll.des AND event.is_current AND ev
 JOIN dim_location AS location ON location.location_id = toll.geonameid::TEXT
 ON CONFLICT (event_key, location_key) DO UPDATE
 SET date_key = EXCLUDED.date_key, deaths = EXCLUDED.deaths, damage_usd = EXCLUDED.damage_usd;
+
+-- A scenario the simulation no longer computes (a city dropped by staging) must not stay in the averages.
+DELETE FROM fact_event_toll AS fact
+USING dim_event AS event, dim_location AS location
+WHERE fact.event_key = event.event_key AND fact.location_key = location.location_key
+  AND event.is_current AND event.origin = 'Simulated'
+  AND NOT EXISTS (SELECT 1 FROM simulation.event_toll AS toll
+                  WHERE toll.des = event.event_id AND toll.geonameid::TEXT = location.location_id);
